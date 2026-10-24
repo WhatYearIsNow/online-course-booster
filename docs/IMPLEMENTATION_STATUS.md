@@ -8,9 +8,10 @@
 | 真实隔离 Chrome | Node 24 已验证 | Chrome 155.0.8059.85 的 7 项检查通过；临时进程与资料目录清理成功 |
 | MOOC 真实只读验收 | 单一授权课程已执行 | 进度接口、成绩栏目、考试列表、视频目录完成检查 |
 | Linux | 按所有者要求暂停 | 此前已执行的本机 WSL 结果仅保留为历史，不再继续或触发 Linux CI |
-| GitHub Actions | 待确认远端仓库 | 本轮仅配置 Windows × Node 22.15.0/24 两组 |
+| GitHub Actions | Windows 作业已触发 | 已获准创建私有仓库，本轮仅运行 Windows × Node 22.15.0/24 两组 |
 | 真实写入验收 | 未执行 | 未提交讨论或考试，未启动视频实验 |
-| GitHub 公开 | 未执行 | 已安装版本保留，独立副本供审阅，MIT 授权 |
+| GitHub 私有仓库 | 已创建并推送 | `WhatYearIsNow/online-course-booster`；已核对 PRIVATE，未公开 |
+| 已安装版本 | 保留原样 | 本轮修改与私有 CI 均使用独立工作区副本 |
 
 ## 真实只读发现与修复
 

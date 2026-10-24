@@ -2,7 +2,7 @@
 
 面向 AI 代理的网课辅助 skill，附带零运行时依赖的中国大学 MOOC CLI。用于读取课程状态、审阅成绩规则、检查考试入口，以及按已确认的计划提交讨论回复。
 
-本目录是可独立移出的项目根目录，按 [MIT 许可证](LICENSE) 授权。当前正在准备首次公开版本，尚未发布至 GitHub 或 npm。真实平台接口与页面结构可能变化；**离线测试通过不代表当前课程或账号已完成真实平台验证**。
+本目录是可独立移出的项目根目录，按 [MIT 许可证](LICENSE) 授权。当前源码已同步到所有者的私有 GitHub 仓库用于 CI，尚未公开，也未发布 npm 包。真实平台接口与页面结构可能变化；**离线测试通过不代表当前课程或账号已完成真实平台验证**。
 
 ## 当前能力
 
@@ -155,4 +155,4 @@ node scripts/icourse163.mjs videos --course 123456 --term 654321 --execute --rul
 
 运行 `npm run check`、`npm test`、`npm run test:coverage` 和 `npm pack --dry-run`。本次结果见 [验收记录](docs/TEST_REPORT.md)，验证边界见 [测试说明](docs/TESTING.md)，提交规范见 [CONTRIBUTING.md](CONTRIBUTING.md)，敏感数据报告见 [SECURITY.md](SECURITY.md)。
 
-本包采用 [MIT 许可证](LICENSE)，`private: true` 用于防止误发 npm，不限制按 MIT 条款公开源码。公开前由项目所有者确认署名与第三方来源，并检查待发布文件及 Git 历史。仓库 URL 与作者信息在确认后补充；本项目没有自动发布工作流。
+本包采用 [MIT 许可证](LICENSE)，`private: true` 用于防止误发 npm，不限制按 MIT 条款公开源码。[GitHub 仓库](https://github.com/WhatYearIsNow/online-course-booster) 当前为私有，用于所有者验收；公开前仍需确认署名、第三方来源及 Git 历史。本项目没有自动发布工作流。
