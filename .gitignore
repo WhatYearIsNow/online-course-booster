@@ -1,0 +1,16 @@
+node_modules/
+.local/
+coverage/
+*.log
+*.tgz
+.env
+.env.*
+!.env.example
+/replies.json
+/grading.txt
+/plan.json
+/result.json
+DevToolsActivePort
+chrome-data/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,20 @@
+{
+  "name": "online-course-booster",
+  "version": "0.1.0",
+  "description": "Local-first course assistance skill and zero-dependency MOOC browser CLI",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=22.15.0" },
+  "scripts": {
+    "check": "node scripts/check-release.mjs",
+    "test": "node scripts/run-tests.mjs",
+    "test:coverage": "node scripts/run-tests.mjs --experimental-test-coverage",
+    "test:browser": "node scripts/browser-smoke.mjs",
+    "prepublishOnly": "npm run check"
+  },
+  "files": [
+    "SKILL.md", "README.md", "LICENSE", "CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md",
+    "platforms/", "references/", "docs/", "scripts/", "examples/", "test/", "evals/"
+  ]
+}

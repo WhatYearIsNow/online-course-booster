@@ -1,0 +1,24 @@
+name: Bug report
+description: 报告可复现的故障，不要包含个人课程记录或凭证。
+body:
+  - type: textarea
+    id: environment
+    attributes:
+      label: 运行环境
+      description: 系统、Node.js、Chrome 版本，使用的连接方式。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      description: 使用合成 ID，隐去用户目录、Cookie 和令牌；优先附离线最小用例。
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: 预期与实际结果
+      description: 附退出码、脱敏后的结构化结果和证据类型。不要直接上传完整 HAR。
+    validations:
+      required: true
