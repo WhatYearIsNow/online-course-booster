@@ -28,6 +28,9 @@ jobs:
           node-version: ${{ matrix.node }}
           package-manager-cache: false
       - run: npm ci
+      - name: Maintenance style checks
+        run: git diff --check
+      - run: npm run format:check
       - run: npm run check
       - run: npm test
       - run: npm pack --dry-run

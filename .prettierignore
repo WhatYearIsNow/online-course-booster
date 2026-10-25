@@ -1,0 +1,8 @@
+**/node_modules/**
+**/fixtures/**
+licenses/**
+_work/**
+.local/**
+build/**
+dist/**
+test-results/**

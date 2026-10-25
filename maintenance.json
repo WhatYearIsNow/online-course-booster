@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "project": "online-course-booster",
+  "skillName": "online-course-booster",
+  "baseline": [
+    [
+      "node",
+      "scripts/check-release.mjs"
+    ],
+    [
+      "node",
+      "scripts/run-tests.mjs"
+    ]
+  ],
+  "test": [
+    [
+      "node",
+      "scripts/check-release.mjs"
+    ],
+    [
+      "node",
+      "scripts/run-tests.mjs"
+    ]
+  ],
+  "check": [
+    [
+      "npm",
+      "ci",
+      "--ignore-scripts",
+      "--no-audit",
+      "--no-fund"
+    ],
+    [
+      "npm",
+      "run",
+      "format:check"
+    ],
+    [
+      "node",
+      "scripts/check-release.mjs"
+    ]
+  ],
+  "candidate": [
+    [
+      "npm",
+      "pack",
+      "--ignore-scripts",
+      "--pack-destination",
+      "{run}/artifacts"
+    ]
+  ],
+  "artifact": "*.tgz",
+  "archivePrefix": "package/",
+  "health": [
+    [
+      "node",
+      "scripts/icourse163.mjs",
+      "--help"
+    ]
+  ],
+  "preserve": [
+    ".local"
+  ],
+  "format-check": [
+    [
+      "npm",
+      "run",
+      "format:check"
+    ]
+  ],
+  "format": [
+    [
+      "npm",
+      "run",
+      "format"
+    ]
+  ]
+}

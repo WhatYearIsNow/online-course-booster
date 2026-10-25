@@ -7,13 +7,14 @@ import { fileURLToPath } from 'node:url';
 const ROOT_FILES = new Set([
   'package.json', 'package-lock.json', 'SKILL.md', 'README.md', 'CHANGELOG.md',
   'CONTRIBUTING.md', 'SECURITY.md', 'LICENSE', 'LICENSE.md',
-  '.gitignore', '.gitattributes', '.editorconfig', '.npmignore'
+  '.gitignore', '.gitattributes', '.editorconfig', '.npmignore',
+  '.prettierrc.json', '.prettierignore', 'maintenance.json', 'MAINTENANCE.md'
 ]);
 const SOURCE_DIRS = new Set(['scripts', 'platforms', 'references', 'docs', 'examples', 'test', 'evals', '.github']);
 const EXCLUDED_DIRS = new Set(['.git', '.local', 'node_modules', 'coverage', 'artifacts', '.artifacts', '.cache']);
 const TEXT_EXTENSIONS = new Set(['.md', '.mjs', '.js', '.json', '.yml', '.yaml', '.txt']);
 const PACK_ENTRIES = new Set([
-  'SKILL.md', 'README.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'SECURITY.md', 'LICENSE', 'LICENSE.md',
+  'SKILL.md', 'README.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'SECURITY.md', 'LICENSE', 'LICENSE.md', 'MAINTENANCE.md',
   'platforms/', 'references/', 'docs/', 'scripts/', 'examples/', 'test/', 'evals/'
 ]);
 
