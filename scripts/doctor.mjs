@@ -22,7 +22,9 @@ Exit: 0 = connection works; 1 = connection failed or requested profile unverifie
 export function parseArgs(args) {
   const options = {};
   const valueFlags = new Map([
-    ['--endpoint', 'endpoint'], ['--user-data-dir', 'userDataDir'], ['--expect-profile', 'expectProfile'],
+    ['--endpoint', 'endpoint'],
+    ['--user-data-dir', 'userDataDir'],
+    ['--expect-profile', 'expectProfile'],
   ]);
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
@@ -41,9 +43,15 @@ export function parseArgs(args) {
 
 function classify(url) {
   let hostname;
-  try { hostname = new URL(url).hostname; } catch { return null; }
+  try {
+    hostname = new URL(url).hostname;
+  } catch {
+    return null;
+  }
   for (const [name, domain] of [
-    ['chaoxing', 'chaoxing.com'], ['icourse163', 'icourse163.org'], ['zhihuishu', 'zhihuishu.com'],
+    ['chaoxing', 'chaoxing.com'],
+    ['icourse163', 'icourse163.org'],
+    ['zhihuishu', 'zhihuishu.com'],
   ]) {
     if (hostname === domain || hostname.endsWith(`.${domain}`)) return name;
   }
@@ -55,7 +63,8 @@ export async function runDoctor(options = {}, dependencies = {}) {
   const connectImpl = dependencies.connect ?? connect;
   let client;
   const report = {
-    ok: false, connection: { status: 'failed' },
+    ok: false,
+    connection: { status: 'failed' },
     capabilities: { cdp: false, targetListing: false },
     profile: { status: 'not-requested' },
     platforms: { chaoxing: 0, icourse163: 0, zhihuishu: 0 },
@@ -75,12 +84,19 @@ export async function runDoctor(options = {}, dependencies = {}) {
       if (platform) report.platforms[platform]++;
     }
     report.ok = report.profile.status !== 'unverified';
-    if (!report.ok) report.warnings.push('Requested profile cannot be verified from this CDP connection. Verify the account in the chosen course page.');
+    if (!report.ok)
+      report.warnings.push(
+        'Requested profile cannot be verified from this CDP connection. Verify the account in the chosen course page.',
+      );
   } catch {
     // Browser/OS errors can contain raw endpoints, profile paths, titles or tokens.
-    report.warnings.push('CDP connection or target listing failed. Check the explicit endpoint or DevToolsActivePort and browser permission.');
+    report.warnings.push(
+      'CDP connection or target listing failed. Check the explicit endpoint or DevToolsActivePort and browser permission.',
+    );
   } finally {
-    try { client?.close(); } catch {}
+    try {
+      client?.close();
+    } catch {}
   }
   return report;
 }
@@ -88,15 +104,27 @@ export async function runDoctor(options = {}, dependencies = {}) {
 export async function main(args = process.argv.slice(2), dependencies = {}) {
   const log = dependencies.log ?? console.log;
   let options;
-  try { options = parseArgs(args); } catch (error) { log(error.message); return 2; }
-  if (options.help) { log(HELP); return 0; }
+  try {
+    options = parseArgs(args);
+  } catch (error) {
+    log(error.message);
+    return 2;
+  }
+  if (options.help) {
+    log(HELP);
+    return 0;
+  }
   const report = await runDoctor(options, dependencies);
   if (options.json) log(JSON.stringify(report, null, 2));
   else {
     log(`CDP connection: ${report.connection.status}`);
     log(`Capabilities: CDP=${report.capabilities.cdp}, target listing=${report.capabilities.targetListing}`);
     log(`Profile identity: ${report.profile.status}`);
-    log(`Course platform pages: ${Object.entries(report.platforms).map(([name, count]) => `${name}=${count}`).join(', ')}`);
+    log(
+      `Course platform pages: ${Object.entries(report.platforms)
+        .map(([name, count]) => `${name}=${count}`)
+        .join(', ')}`,
+    );
     for (const warning of report.warnings) log(`Warning: ${warning}`);
   }
   return report.ok ? 0 : 1;
