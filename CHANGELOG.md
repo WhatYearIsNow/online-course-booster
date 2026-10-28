@@ -1,5 +1,13 @@
 # 变更记录
 
+## Unreleased — 超星学习广场
+
+- 新增 `scripts/chaoxing.mjs` 与 `scripts/lib/chaoxing.mjs`：`status`、`chapters` 只读；`quiz`、`run` 默认预览，`--submit --confirm DIGEST` 才提交。
+- 作答策略只有启发式 `--strategy first`（判断/单选选第 1 项，多选选前 2 项），不读题干、不使用答案库。
+- 摘要绑定课程、班级、章节与题目结构；页面变化拒绝提交。提交日志独占，不自动重试；风控、验证码、`enc 校验失败`、结果含糊时停止。
+- 真实实测：受管 headless 登录、积分读取、单章提交（1 → 7）、批量提交（13 → 21）、完整批量（21 → 801，答题 800）；确认超星鉴权 cookie 为会话型，重启实例需重新登录。
+- 新增 12 项离线回归，覆盖 URL/解析/摘要/参数校验与只读 CLI。
+
 ## Unreleased — 受管浏览器
 
 - 新增受管浏览器：`scripts/browser.mjs status|start|open|stop` 与 `scripts/lib/launch.mjs`。使用独立资料目录与动态回环调试端口，进程与 CLI 分离，不读取、不复制、不修改日常浏览器资料。

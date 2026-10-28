@@ -1,37 +1,68 @@
-# 超星学习通：文档范围
+# 超星学习通（形势与政策广场）
 
-**本项目没有超星脚本实现。** 超星课程与中国大学 MOOC 不是同一套协议，不应使用本包的 MOOC CLI。旧版本引用的另一个本地 skill 不随本仓库分发，也不是安装本包的前置条件。
+本包提供超星学习广场（`tsjy.chaoxing.com`）的只读查询与测评提交 CLI。它与 `icourse163` 是两套完全不同的协议，不能混用命令。
 
-## 历史观察
+## 命令
 
-以下来自 2026-10 的有限环境记录，本次重构没有复测，也没有保留可公开的原始账号证据：
+```sh
+node scripts/chaoxing.mjs status   --course-id ID --class-id ID --managed --headless
+node scripts/chaoxing.mjs chapters --course-id ID --class-id ID --managed --headless
+node scripts/chaoxing.mjs quiz     --course-id ID --class-id ID --chapter ID --managed --headless
+node scripts/chaoxing.mjs run      --course-id ID --class-id ID --target 800 --managed --headless
+```
 
-| 观察 | 使用边界 |
+| 命令 | 性质 | 说明 |
+|---|---|---|
+| `status` | 只读 | 读取 `window.userId` / `courseId` / `classId` 与积分接口 |
+| `chapters` | 只读 | 从分类接口/广场页取分类，再分页读取知识点 ID |
+| `quiz` | 预览 → 提交 | 默认只预览题目结构与摘要；`--submit --confirm DIGEST` 才作答 |
+| `run` | 预览 → 批量提交 | 默认只输出计划；`--submit --confirm DIGEST` 才逐章执行 |
+
+连接方式与 MOOC CLI 相同：显式 `--endpoint` / `--user-data-dir`，或 `--managed [--headless] [--data-dir DIR]` 使用隔离的受管浏览器。
+
+## 页面与接口
+
+| 用途 | 位置 |
 |---|---|
-| 学习广场门户与实际测评入口分离 | 不能把门户预览页当作可答题页面 |
-| 某些入口参数与账号有关 | 不复制其他账号的参数；错误页 URL 可能仍像学习页 |
-| 测评标签与 iframe 层级可能变化 | 需要现场确认页面，不写死标签序号 |
-| 积分构成可从课程当前页面查看 | 每课规则不同，不公开历史个人积分或外推固定达标线 |
+| 广场页 | `https://tsjy.chaoxing.com/plaza/?courseId=...` |
+| 积分 | `GET /plaza/score/{courseId}/user-score-detail?classId=` |
+| 分类 | `GET /plaza/classify-list?courseId=..&classId=..&userId=..`，或广场页 `classifyId=` 链接 |
+| 知识点 | `GET /plaza/knowledge-list?classifyId=..&courseId=..&classId=..&page=N`，HTML 中 `goKnowledge(<i>, <id>)` |
+| 学习入口 | `GET /plaza/user/{courseId}/{knowledgeId}/modify-node?classId=` → `{mode, enc, domain, classId}` |
+| 学习页 | `<domain>/mycourse/transfer?...refer=<studentstudy URL>` |
 
-这些是适配提醒，不代表支持自动答题、保证积分或可直接复用的接口契约。
+`mode !== 'study'` 表示只读预览页，没有测评，直接跳过。`enc` 与账号绑定，必须每章现取；写死旧值会得到「enc 校验失败」错误页。
 
-## 2026-10-28 受管浏览器只读实测
+测评位于三层 iframe：`#iframe` → `iframe[src*="modules/work/"]` → `#frame_content` → `.TiMu`。题型从题干 `【判断题】/【单选题】/【多选题】` 读取，选项为 `li.font-cxsecret`，提交为 `a.btnSubmit`，二次确认为 `onclick` 含 `submitCheckTimes` 的 `a.bluebtn`。
 
-用本包的受管浏览器（独立资料目录、headless、detached）做了一次只读验证，未答题、未播放视频、未提交任何学习行为：
+## 作答策略与边界
 
-| 观察 | 边界 |
+- 当前只有 `--strategy first`：判断题/单选题选第 1 项，多选题选前 2 项。**不读取题干、不使用答案库**，正确率取决于题目分布，不保证达标。
+- 字体混淆（`font-cxsecret`）使 DOM 文本不可读；策略不依赖文本，因此不受影响。
+- 提交前必须预览并取得摘要；摘要绑定课程、班级、章节与题目结构（题型 + 选项数）。页面结构变化会导致摘要不匹配并拒绝提交。
+- 不自动重试。提交后未确认、出现风控或结果含糊时写 `uncertain` 并停止。
+- 遇到验证码、`操作频繁`、`已在其他页面学习`、`enc 校验失败`、登录失效时停止并报告。
+- 单学习标签页：`run` 只复用一个学习页，避免「账号已在其他页面学习」。
+- 日志默认 `.local/journals/chaoxing-<digest>.jsonl`，已存在时拒绝重跑。继续未完成的批量任务时用新的 `--journal` 路径；平台已完成的测评会显示「已完成」，据此跳过。换日志路径或新摘要不是全局幂等保证。
+
+## 2026-10-28 实测记录
+
+环境：Windows、Node 24、Chrome 155、受管 headless 实例。
+
+| 步骤 | 结果 |
 |---|---|
-| 登录页 `passport2.chaoxing.com` 可用手机号 + 密码登录；本次未出现图形验证码 | 验证码、风控出现时必须停止；一次通过不代表后续免验证 |
-| 登录后进入 `i.chaoxing.com` 门户，课程列表在 `mooc2-ans.chaoxing.com/visit/interaction` 的内嵌页中 | 门户与课程列表是不同页面，不能把门户当课程页 |
-| 课程卡片链接指向 `mooc1.chaoxing.com/visit/stucoursemiddle`，广场为 `tsjy.chaoxing.com/plaza/?courseId=...` | 课程与班级 ID 必须从当前账号的课程页读取，不沿用旧值 |
-| 广场页可用 `window.userId` / `window.courseId` / `window.classId` 核对身份；积分走 `/plaza/score/{courseId}/user-score-detail?classId=` | 广场 HTML 里的总积分由 JS 填充，不解析静态文本 |
-| 鉴权 cookie（`_uid`、`_d`、`UID`、`uf`、`vc3`、`p_auth_token` 等）均为会话型；只有 `fid`、`xxtenc`、`tl` 持久 | 关闭受管实例后需重新登录；勾选“下次自动登录”未改变该行为 |
-| 登录页“下次自动登录”提示为“勾选后保持 7 天；不勾选关闭浏览器即退出” | 页面提示与实际 cookie 行为不一致时，以 cookie 元数据为准 |
+| 登录 | 手机号 + 密码成功，未出现验证码 |
+| `status` | 总积分 1、达标线 800，分项 7 项 |
+| `chapters` | 8 个分类、256 个知识点 |
+| `quiz` 预览 | 5 题（3 判断 + 2 单选），摘要生成 |
+| `quiz` 提交 | 提交并二次确认成功，本次成绩 60，广场积分 1 → 7 |
+| `run` 批量 | 跳过已完成章节，逐章作答提交；积分 13 → 21 |
+| 完整批量 | 处理 173 章（164 提交、5 已完成、3 跳过、1 章命中验证码模式停止）；积分 21 → 801（答题 800、登录 1） |
+| 重启实例 | 登录态丢失；鉴权 cookie 均为会话型 |
 
-结论：受管浏览器可以稳定承载超星页面的后台只读任务；登录态跨重启不持久是平台会话 cookie 的行为。本包仍**不包含**超星答题、视频或积分自动化实现，上述观察只用于后续适配，不构成支持声明。
+## 已知限制
 
-## 后续实现应满足的条件
-
-先实现只读课程身份、当前学期规则与状态，再考虑任何写入。多账号必须明确核对目标，不以 URL 子串或任意标签页兜底。若有写入，需要可审阅预览、用户授权、结果读回与含糊结果停止策略。
-
-遇到验证码、校验错误、权限提示或风控时停止。需要其他工具时，单独检查其来源、版本、许可证和授权，不自动寻找个人机器上的私有目录。
+- 登录态不跨实例重启持久（会话型 cookie）；保持受管实例运行可复用。
+- 启发式作答不保证 800 分；未实现视频、阅读、笔记、讨论等计分项。
+- 页面结构、接口或风控变化可能使命令失效；失败时停止，不绕过。
+- 一次通过不代表后续学期或账号通用。

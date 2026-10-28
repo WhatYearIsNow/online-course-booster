@@ -1,6 +1,6 @@
 # online-course-booster
 
-面向 AI 代理的网课辅助 skill，附带零运行时依赖的中国大学 MOOC CLI。用于读取课程状态、审阅成绩规则、检查考试入口，以及按已确认的计划提交讨论回复。
+面向 AI 代理的网课辅助 skill，附带零运行时依赖的中国大学 MOOC 与超星学习广场 CLI。用于读取课程状态、审阅成绩规则、检查考试入口、按已确认的计划提交讨论回复，以及在超星广场按预览确认后作答测评。
 
 本目录是可独立移出的项目根目录，按 [MIT 许可证](LICENSE) 授权。GitHub 源码仓库已公开；尚未发布 GitHub Release 或 npm 包。真实平台接口与页面结构可能变化；**离线测试通过不代表当前课程或账号已完成真实平台验证**。
 
@@ -12,9 +12,10 @@
 | 中国大学 MOOC：`discuss` | 离线预览、摘要确认、提交日志 | 接口回复 ID 只表示收到确认，仍需人工读回 |
 | 中国大学 MOOC：`videos` | 默认扫描；显式开启历史实验 | DOM 标记与服务端汇总分别记录，不承诺逐项最终完成或成绩 |
 | 受管浏览器：`browser status/start/open/stop` | 有 CLI | 隔离资料目录、后台运行；登录态能否跨重启持久取决于平台 |
-| 超星学习通 | 只有研究文档 | 未包含实现或其他 skill |
+| 超星学习通：`status`、`chapters` | 有 CLI | 只读身份、积分与知识点；真实环境已实测 |
+| 超星学习通：`quiz`、`run` | 预览、摘要确认、提交日志 | 启发式作答，不保证达标；风控即停 |
 | 智慧树 / 知到 | 只有研究文档 | 未包含登录、验证码或课程自动化实现 |
-| 单元测试、期末考试作答与提交 | 未实现 | `exam` 仅检查列表状态 |
+| 单元测试、期末考试作答与提交（MOOC） | 未实现 | `exam` 仅检查列表状态 |
 
 平台历史观察见 [证据说明](references/verification.md)。旧版本中的个人浏览器账户、私有中继和外部 skill 路径已从默认运行流程中移除。
 
@@ -176,6 +177,41 @@ node scripts/icourse163.mjs videos --course 123456 --term 654321 --execute --rul
 | 4 | 中断、上下文失效或结果含糊 | 保存证据；写请求先人工核对再决定后续 |
 
 非零退出不自动触发重试。即使退出码为 0，也不等于平台最终计分。
+
+## 超星学习广场 CLI
+
+超星与中国大学 MOOC 是两套协议，使用独立入口 `scripts/chaoxing.mjs`。详细页面结构与边界见 [超星说明](platforms/chaoxing.md)。
+
+```sh
+# 只读：身份、总积分、达标线与分项规则
+node scripts/chaoxing.mjs status --course-id 123456 --class-id 654321 --managed --headless
+
+# 只读：分类与知识点（章节）ID
+node scripts/chaoxing.mjs chapters --course-id 123456 --class-id 654321 --managed --headless
+
+# 预览单章测评（不提交）
+node scripts/chaoxing.mjs quiz --course-id 123456 --class-id 654321 --chapter 789012 --managed --headless
+
+# 提交该章（使用预览返回的摘要）
+node scripts/chaoxing.mjs quiz --course-id 123456 --class-id 654321 --chapter 789012 \
+  --submit --confirm REPLACE_WITH_PREVIEW_DIGEST --managed --headless
+
+# 预览批量冲分计划（不提交）
+node scripts/chaoxing.mjs run --course-id 123456 --class-id 654321 --target 800 --managed --headless
+
+# 执行批量冲分（可加 --max-chapters 限制本次处理章节数）
+node scripts/chaoxing.mjs run --course-id 123456 --class-id 654321 --target 800 \
+  --submit --confirm REPLACE_WITH_PREVIEW_DIGEST --max-chapters 20 --timeout-ms 3600000 --managed --headless
+```
+
+`123456` / `654321` / `789012` 都是**合成示例**，必须替换为当前账号课程页中的真实 ID。
+
+- 连接参数与 MOOC CLI 一致：`--endpoint`、`--user-data-dir`，或 `--managed [--headless] [--data-dir DIR] [--browser PATH]`。
+- `--expect-user` 可核对 `window.userId`；`--classify` 可显式指定分类 ID。
+- 作答策略只有 `--strategy first`：判断题/单选题选第 1 项，多选题选前 2 项。**不读题干、不用答案库**，不保证达到目标分。
+- 摘要绑定课程、班级、章节与题目结构；页面变化会拒绝提交。提交不自动重试，风控或结果含糊时写 `uncertain` 并停止。
+- 日志默认 `.local/journals/chaoxing-<digest>.jsonl`，已存在时拒绝重跑；平台已完成的测评会显示「已完成」并跳过。继续上次未完成的批量任务时，用新的 `--journal` 路径。
+- 只实现测评作答；视频、阅读、笔记、讨论等计分项未实现。
 
 ## 项目结构
 
