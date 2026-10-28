@@ -210,7 +210,7 @@ node scripts/chaoxing.mjs run --course-id 123456 --class-id 654321 --target 800 
 - `--expect-user` 可核对 `window.userId`；`--classify` 可显式指定分类 ID。
 - 作答策略只有 `--strategy first`：判断题/单选题选第 1 项，多选题选前 2 项。**不读题干、不用答案库**，不保证达到目标分。
 - 摘要绑定课程、班级、章节与题目结构；页面变化会拒绝提交。提交不自动重试，风控或结果含糊时写 `uncertain` 并停止。
-- 日志默认 `.local/journals/chaoxing-<digest>.jsonl`，已存在时拒绝重跑；平台已完成的测评会显示「已完成」并跳过。
+- 日志默认 `.local/journals/chaoxing-<digest>.jsonl`，已存在时拒绝重跑；平台已完成的测评会显示「已完成」并跳过。继续上次未完成的批量任务时，用新的 `--journal` 路径。
 - 只实现测评作答；视频、阅读、笔记、讨论等计分项未实现。
 
 ## 项目结构
