@@ -7,6 +7,7 @@
 | 静态检查 | 源文件、相对链接、包清单与敏感样式检查 | 已知可检测的发布问题未出现 | 没有任何隐私信息或法律问题 |
 | 纯函数 | URL、输入、DWR 响应与请求体 | 合成输入下行为一致 | 平台接口仍沿用该协议 |
 | 本地集成 | 模拟 CDP、CLI 参数与离线计划 | 超时、错误、确认边界可复现 | 已登录真实浏览器的行为 |
+| 受管浏览器 | 注入 spawn/connect/文件读取的生命周期与 CLI 参数 | 复用、启动、超时、取消、条件超时的分支 | 真实 Chrome 行为与平台登录持久性 |
 | 代理评估 | 按场景选择流程与证据表述 | 给定场景下的决策符合约束 | 所有未来对话均正确 |
 | 真实平台 | 授权账号中读页/接口与人工核验 | 指定日期和条件下的观察 | 全平台、所有课程、后续学期通用 |
 
@@ -45,6 +46,16 @@ npm pack --dry-run
 `npm run test:browser -- --browser <Chrome可执行文件绝对路径>` 使用新建的临时数据目录和合成 `data:` 页面，覆盖真实 WebSocket 探活、并发 attach、执行与导航、错误响应、超时和取消。也可使用 `CHROME_BINARY` 环境变量指定可执行文件。脚本不会复用已登录资料，不连接课程平台，结束后关闭自己启动的浏览器并清理临时目录。
 
 这是按需执行的检查；`npm test` 不启动浏览器。Chrome 必须能够在当前执行环境正常启动；受限执行沙箱可能阻止 Chrome 子进程，不能据此修改参数关闭 Chrome 自身沙箱。按宿主授权机制处理执行环境限制，无法运行时记录为未执行。
+
+受管浏览器另可手动冒烟（独立资料目录，不接触日常浏览器）：
+
+```sh
+node scripts/browser.mjs start --headless --data-dir .local/managed-smoke
+node scripts/browser.mjs open --data-dir .local/managed-smoke --url https://example.com/ --expect 'document.title.length > 0'
+node scripts/browser.mjs stop --data-dir .local/managed-smoke
+```
+
+`npm test` 中的受管用例只注入 spawn/connect/文件读取，不启动真实 Chrome；真实启动、登录与平台登录持久性仍需单独授权验证。
 
 ## CI 矩阵
 
