@@ -112,6 +112,8 @@ test('成绩与风控文本解析', () => {
   assert.deepEqual(parseQuizResult('本次成绩 8 分 已完成'), { done: true, score: 8 });
   assert.deepEqual(parseQuizResult('尚未提交'), { done: false, score: null });
   assert.equal(detectBlocked('请输入验证码'), 'captcha');
+  assert.equal(detectBlocked('拖动滑块完成验证'), 'captcha');
+  assert.equal(detectBlocked('题目：验证码的作用是什么'), null);
   assert.equal(detectBlocked('您的账号已在其他页面学习'), 'single-tab-conflict');
   assert.equal(detectBlocked('enc 校验失败'), 'enc-invalid');
   assert.equal(detectBlocked('正常题目'), null);

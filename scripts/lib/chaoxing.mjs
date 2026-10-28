@@ -111,7 +111,7 @@ export function parseQuizResult(text) {
 }
 
 const BLOCK_RULES = [
-  [/验证码|滑块验证|拖动.*验证/, 'captcha'],
+  [/请输入验证码|拖动滑块|滑块验证|完成验证|安全验证/, 'captcha'],
   [/操作频繁|请求过于频繁|稍后再试/, 'rate-limited'],
   [/已在其他页面学习|账号已在其他/, 'single-tab-conflict'],
   [/请先登录|扫码登录|登录已过期/, 'login-required'],
