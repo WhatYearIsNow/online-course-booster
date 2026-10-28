@@ -151,3 +151,41 @@ test('命令总超时取消连接，不挂住CLI', async () => {
   assert.equal(code, 4);
   assert.ok(performance.now() - started < 2000);
 });
+test('受管浏览器参数互斥且在连接前校验', async () => {
+  for (const argv of [
+    ['status', ...identity, '--headless'],
+    ['status', ...identity, '--data-dir', '.local/x'],
+    ['status', ...identity, '--browser', 'C:/chrome.exe'],
+    ['status', ...identity, '--managed', '--endpoint', 'ws://127.0.0.1:9222/devtools/browser/X'],
+    ['status', ...identity, '--managed', '--expect-profile', 'Profile 4'],
+  ]) {
+    assert.equal(await main(argv, noBrowser), 1, argv.join(' '));
+  }
+  const parsed = parseCli(['status', ...identity, '--managed', '--headless', '--data-dir', '.local/x']);
+  assert.equal(parsed.managed, true);
+  assert.equal(parsed.headless, true);
+});
+test('受管模式走受管连接，不读取显式端点', async () => {
+  let managedCalls = 0;
+  let connectCalls = 0;
+  const client = {
+    close() {},
+    connectionInfo: { profile: { status: 'not-requested' } },
+    async targets() {
+      return [{ targetId: 'one', url: 'https://www.icourse163.org/learn/DEMO-1000?tid=2000' }];
+    },
+  };
+  await main(['status', ...identity, '--managed', '--data-dir', '.local/x'], {
+    connect: async () => {
+      connectCalls++;
+      return client;
+    },
+    ensureManagedBrowser: async () => {
+      managedCalls++;
+      return { client };
+    },
+    errorOutput() {},
+  });
+  assert.equal(managedCalls, 1);
+  assert.equal(connectCalls, 0);
+});

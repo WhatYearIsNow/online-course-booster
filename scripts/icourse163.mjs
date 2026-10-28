@@ -3,6 +3,7 @@ import { parseArgs } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import { resolve, join } from 'node:path';
 import { connect } from './cdp.mjs';
+import { ensureManagedBrowser } from './lib/launch.mjs';
 import {
   createPlan,
   validatePlan,
@@ -20,6 +21,7 @@ const HELP = `中国大学 MOOC 工具（Node.js >=22.15）
 用法: node scripts/icourse163.mjs <command> --course ID --term ID [options]
 命令: status | grading | exam | videos | discuss
 连接: --endpoint ws://127.0.0.1:PORT/devtools/browser/ID 或 --user-data-dir PATH
+受管浏览器: --managed [--headless] [--data-dir DIR] [--browser PATH]（隔离、不占用日常浏览器）
 目标: --target ID（多个匹配标签时必填） --school CODE --expect-profile NAME
 输出: --out FILE（JSON，拒绝覆盖） --timeout-ms MS（默认120000）
 讨论预览（完全离线）:
@@ -43,8 +45,10 @@ const STRINGS = [
   'journal',
   'out',
   'timeout-ms',
+  'data-dir',
+  'browser',
 ];
-const BOOLEANS = ['help', 'submit', 'dry-run', 'execute'];
+const BOOLEANS = ['help', 'submit', 'dry-run', 'execute', 'managed', 'headless'];
 export function parseCli(argv) {
   let parsed;
   try {
@@ -93,6 +97,13 @@ export function parseCli(argv) {
   }
   if (cmd === 'videos' && Boolean(v.execute) !== Boolean(v.rules))
     throw new TaskError('实验播放需要同时提供 --execute 和 --rules。', EXIT.ARGS);
+  if (v.headless && !v.managed) throw new TaskError('--headless 需要配合 --managed。', EXIT.ARGS);
+  if ((v['data-dir'] || v.browser) && !v.managed)
+    throw new TaskError('--data-dir 和 --browser 只适用于 --managed。', EXIT.ARGS);
+  if (v.managed && (v.endpoint || v['user-data-dir']))
+    throw new TaskError('--managed 不能与 --endpoint 或 --user-data-dir 同时使用。', EXIT.ARGS);
+  if (v.managed && v['expect-profile'])
+    throw new TaskError('受管浏览器无法证明 --expect-profile；请改用日常浏览器连接。', EXIT.ARGS);
   return {
     ...v,
     cmd,
@@ -100,6 +111,29 @@ export function parseCli(argv) {
     identity: { course: v.course, term: v.term, ...(v.school ? { school: v.school } : {}) },
   };
 }
+/**
+ * Managed browsers start empty. When no matching course tab exists and the
+ * school code is known, open the exact learning URL once, then select it by
+ * course and term. A login redirect still fails selection rather than guessing.
+ */
+async function selectManagedTarget(client, options, signal) {
+  try {
+    return selectTarget(await client.targets(), options.identity, options.target);
+  } catch (error) {
+    if (!options.managed || options.target || !options.school) throw error;
+    const url = `https://www.icourse163.org/learn/${options.school}-${options.identity.course}?tid=${options.identity.term}#/learn/content`;
+    const targetId = await client.createTarget('about:blank', { signal });
+    await client.navigate(targetId, url, { signal });
+    const loaded = await client.waitFor(targetId, 'document.readyState === "complete"', {
+      timeoutMs: 60000,
+      intervalMs: 300,
+      signal,
+    });
+    if (!loaded) throw new TaskError('受管浏览器打开课程页超时；请核对登录状态。');
+    return selectTarget(await client.targets(), options.identity, targetId);
+  }
+}
+
 export async function main(argv = process.argv.slice(2), deps = {}) {
   const output = deps.output ?? ((value) => console.log(JSON.stringify(value, null, 2)));
   const errorOutput = deps.errorOutput ?? ((text) => console.error(text));
@@ -142,18 +176,29 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
     if (options.out) reservedOutput = reserveJson(options.out);
     timer = setTimeout(abort, options.timeoutMs);
     controller.signal.throwIfAborted();
-    client = await (deps.connect ?? connect)(undefined, {
-      endpoint: options.endpoint,
-      userDataDir: options['user-data-dir'],
-      expectProfile: options['expect-profile'],
-      signal: controller.signal,
-    });
+    if (options.managed) {
+      const managed = await (deps.ensureManagedBrowser ?? ensureManagedBrowser)({
+        dataDir: resolve(options['data-dir'] ?? join(process.cwd(), '.local', 'managed-browser')),
+        executable: options.browser ?? process.env.OCB_BROWSER ?? null,
+        headless: Boolean(options.headless),
+        connect: deps.connect,
+        signal: controller.signal,
+      });
+      client = managed.client;
+    } else {
+      client = await (deps.connect ?? connect)(undefined, {
+        endpoint: options.endpoint,
+        userDataDir: options['user-data-dir'],
+        expectProfile: options['expect-profile'],
+        signal: controller.signal,
+      });
+    }
     if (
       client.connectionInfo?.profile?.status === 'unverified' ||
       (options['expect-profile'] && client.connectionInfo?.profile?.status !== 'verified')
     )
       throw new TaskError('无法证明连接端点属于要求的 profile；操作已停止。');
-    const chosen = selectTarget(await client.targets(), options.identity, options.target);
+    const chosen = await selectManagedTarget(client, options, controller.signal);
     const result = await runCommand(client, chosen, options, { plan, signal: controller.signal });
     reservedOutput?.write(result);
     output(result);
