@@ -11,6 +11,7 @@
 | 中国大学 MOOC：`status`、`grading`、`exam` | 有 CLI | 页面与接口适配需真实环境复测 |
 | 中国大学 MOOC：`discuss` | 离线预览、摘要确认、提交日志 | 接口回复 ID 只表示收到确认，仍需人工读回 |
 | 中国大学 MOOC：`videos` | 默认扫描；显式开启历史实验 | DOM 标记与服务端汇总分别记录，不承诺逐项最终完成或成绩 |
+| 受管浏览器：`browser status/start/open/stop` | 有 CLI | 隔离资料目录、后台运行；登录态能否跨重启持久取决于平台 |
 | 超星学习通 | 只有研究文档 | 未包含实现或其他 skill |
 | 智慧树 / 知到 | 只有研究文档 | 未包含登录、验证码或课程自动化实现 |
 | 单元测试、期末考试作答与提交 | 未实现 | `exam` 仅检查列表状态 |
@@ -50,6 +51,39 @@ node scripts/doctor.mjs --user-data-dir /path/to/automation-data
 
 也可通过环境变量配置连接，优先级依次为：`--endpoint`、`--user-data-dir`、`CDP_ENDPOINT`、`CDP_RELAY_URL`、`CHROME_USER_DATA_DIR`。显式命令行配置优先于环境变量；同时给出两个命令行连接参数时，端点优先。`CDP_RELAY_URL` 只连接使用者已经配置的本机服务，不自动启动中继。`CDP_EXPECT_PROFILE` 等同于 profile 要求；不需要该要求时不要设置。
 
+### 受管浏览器（隔离、后台运行）
+
+除了连接自己启动的 Chrome，也可以让本包启动一个**受管浏览器**：独立资料目录、动态回环调试端口、进程与 CLI 分离。它不读取、不复制、不修改日常浏览器及其资料，任务运行时也不占用日常浏览器窗口。
+
+```sh
+node scripts/browser.mjs status
+node scripts/browser.mjs start --headless
+node scripts/browser.mjs open --url https://example.com/ --expect 'document.title.length > 0'
+node scripts/browser.mjs stop
+```
+
+| 命令 | 作用 |
+|---|---|
+| `status` | 只读报告受管实例、端点与可执行文件；不启动进程 |
+| `start` | 启动或复用受管实例；默认有窗口，`--headless` 无窗口 |
+| `open --url URL` | 在受管实例中打开页面；`--expect EXPR` 等待页面条件，`--reload-every-ms` 定时刷新，`--screenshot FILE` 截图 |
+| `stop` | 通过 CDP 关闭受管实例并冲刷资料 |
+
+- 数据目录默认 `.local/managed-browser`，可用 `--data-dir` 或 `OCB_DATA_DIR` 指定；可执行文件可用 `--browser` 或 `OCB_BROWSER` 指定，否则自动发现 Chrome / Chromium / Edge。
+- 受管实例在 CLI 退出后继续运行，再次运行会复用同一实例；`stop` 只关闭受管实例，不影响日常浏览器。
+- 登录态保存在受管资料目录中，但**是否跨重启持久由平台决定**：会话型鉴权 cookie 在关闭浏览器后失效，需要重新登录；保持实例运行即可复用登录态。
+- `open` 只接受不含凭据的 http/https 地址。输出可能包含页面标题与 URL，可能属于私人内容，不要贴到公开处。
+- 退出码：0 成功；1 参数；2 环境或连接；3 页面条件未满足（部分失败）；4 中断。
+
+MOOC 命令可直接使用受管实例，不必先手动启动 Chrome：
+
+```sh
+node scripts/icourse163.mjs status --course 123456 --term 654321 --school DEMO --managed --headless
+```
+
+`--managed` 不能与 `--endpoint`、`--user-data-dir`、`--expect-profile` 同时使用；`--headless`、`--data-dir`、`--browser` 只适用于 `--managed`。提供 `--school` 时，若受管实例中没有匹配课程和学期的标签页，会打开对应学习页一次，再按身份选择；登录重定向仍会失败，不会猜测页面。
+
+
 ## CLI
 
 ```sh
@@ -66,6 +100,10 @@ node scripts/doctor.mjs --help
 | `--endpoint <url>` | 显式的本机浏览器 WebSocket CDP 端点，不接受 HTTP |
 | `--user-data-dir <path>` | 读取独立 Chrome 资料目录中的调试连接信息 |
 | `--expect-profile <name>` | 要求资料目录证据；当前无法证明时阻断 |
+| `--managed` | 使用受管浏览器（隔离、后台），不连接日常浏览器 |
+| `--headless` | 仅配合 `--managed`：无窗口运行 |
+| `--data-dir <path>` | 仅配合 `--managed`：受管数据目录 |
+| `--browser <path>` | 仅配合 `--managed`：指定 Chromium 系可执行文件 |
 | `--school <code>` | 可选核对 URL 中的学校代码 |
 | `--out <path>` | 将结构化结果写入本地 JSON 文件，父目录须存在且拒绝覆盖 |
 | `--timeout-ms <ms>` | 有限的操作超时 |

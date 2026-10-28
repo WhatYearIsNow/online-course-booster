@@ -15,6 +15,19 @@
 
 `--endpoint` 接受本机连接，不需要安装私有 relay、UIA 批准脚本或其他 skill。浏览器要求批准时由用户手动确认。不要把“Chrome 永远只允许一个客户端”作为所有版本的事实。
 
+## 受管浏览器
+
+| 现象 | 可能原因 | 处理 |
+|---|---|---|
+| `No Chromium-based browser was found` | 未安装 Chrome/Chromium/Edge，或不在候选路径 | 用 `--browser` 或 `OCB_BROWSER` 指定绝对路径 |
+| `Managed browser exited during startup` | 无显示环境却用了有窗口模式 | 加 `--headless` |
+| `did not become connectable within ...ms` | 启动慢、安全软件拦截、资料目录不可写 | 先 `status`，换可写 `--data-dir`，必要时手动核对 |
+| 重启后需要重新登录 | 平台鉴权 cookie 是会话型 | 保持受管实例运行；或按平台正规流程重新登录 |
+| `open` 返回 `expect-timeout`（退出码 3） | 页面条件未满足（未登录、加载慢、选择器变化） | 加 `--screenshot` 看页面；不能当作成功 |
+| 受管实例残留 | 未执行 `stop` | `node scripts/browser.mjs stop --data-dir DIR` |
+
+受管实例使用独立资料目录，不读取、不复制日常浏览器资料；`stop` 只关闭受管实例。登录态是否跨重启持久由平台决定，不能把“资料目录还在”当作“仍已登录”。
+
 ## 目标身份
 
 - **找不到课程**：确认学习页确在官方域名，course 与 term 是当前课程学期。课程主页不一定是可用学习页。

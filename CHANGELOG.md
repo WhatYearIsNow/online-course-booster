@@ -1,5 +1,13 @@
 # 变更记录
 
+## Unreleased — 受管浏览器
+
+- 新增受管浏览器：`scripts/browser.mjs status|start|open|stop` 与 `scripts/lib/launch.mjs`。使用独立资料目录与动态回环调试端口，进程与 CLI 分离，不读取、不复制、不修改日常浏览器资料。
+- MOOC CLI 新增 `--managed`、`--headless`、`--data-dir`、`--browser`；提供 `--school` 时可在空实例中打开对应学习页，再按课程与学期选择。
+- 页面条件等待超时返回部分失败（退出码 3），不再误报为中断。
+- 真实隔离实测：受管 headless 实例完成超星登录、进入形势与政策广场并读取积分接口；确认超星鉴权 cookie 为会话型，重启实例后需重新登录。
+- 新增 19 项离线回归，覆盖受管生命周期、参数互斥与 browser CLI。
+
 ## Unreleased maintenance
 
 - 固定开发格式工具并接入现有 CI；补充隔离验证、候选构建、健康检查、代码/数据回退边界与源码阅读路线。运行接口与数据格式保持不变。
