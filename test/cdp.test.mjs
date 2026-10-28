@@ -2,7 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getEventListeners } from 'node:events';
 import { connect, sleep, FATAL_RE } from '../scripts/cdp.mjs';
-import { validateEndpoint, readDevToolsEndpoint, resolveConnectionConfig } from '../scripts/lib/connection-config.mjs';
+import {
+  validateEndpoint,
+  readDevToolsEndpoint,
+  resolveConnectionConfig,
+} from '../scripts/lib/connection-config.mjs';
 
 // EventTarget wire simulator: these tests never create a network socket.
 function transport(handler, { autoOpen = true } = {}) {
@@ -14,9 +18,13 @@ function transport(handler, { autoOpen = true } = {}) {
       this.readyState = 0;
       this.sent = [];
       this.constructor.instances.push(this);
-      if (autoOpen) queueMicrotask(() => {
-        if (this.readyState === 0) { this.readyState = 1; this.dispatchEvent(new Event('open')); }
-      });
+      if (autoOpen)
+        queueMicrotask(() => {
+          if (this.readyState === 0) {
+            this.readyState = 1;
+            this.dispatchEvent(new Event('open'));
+          }
+        });
     }
     send(raw) {
       const message = JSON.parse(raw);
@@ -24,14 +32,21 @@ function transport(handler, { autoOpen = true } = {}) {
       if (handler) handler(this, message);
       else if (message.method === 'Target.getTargets') this.reply(message, { targetInfos: [] });
     }
-    message(value) { this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(value) })); }
-    reply(request, result = {}, error) {
-      queueMicrotask(() => this.message({
-        id: request.id, ...(request.sessionId ? { sessionId: request.sessionId } : {}),
-        ...(error ? { error } : { result }),
-      }));
+    message(value) {
+      this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(value) }));
     }
-    event(method, params = {}) { this.message({ method, params }); }
+    reply(request, result = {}, error) {
+      queueMicrotask(() =>
+        this.message({
+          id: request.id,
+          ...(request.sessionId ? { sessionId: request.sessionId } : {}),
+          ...(error ? { error } : { result }),
+        }),
+      );
+    }
+    event(method, params = {}) {
+      this.message({ method, params });
+    }
     close() {
       this.readyState = 3;
       this.dispatchEvent(new Event('close'));
@@ -48,8 +63,10 @@ function probeAnd(handler) {
 
 async function client(t, handler, options = {}) {
   const cdp = await connect(undefined, {
-    endpoint: 'ws://127.0.0.1:9222/devtools/browser/test', env: {},
-    WebSocketClass: transport(probeAnd(handler)), requestTimeoutMs: 100,
+    endpoint: 'ws://127.0.0.1:9222/devtools/browser/test',
+    env: {},
+    WebSocketClass: transport(probeAnd(handler)),
+    requestTimeoutMs: 100,
     ...options,
   });
   t.after(() => cdp.close());
@@ -57,36 +74,80 @@ async function client(t, handler, options = {}) {
 }
 
 test('endpoint policy accepts loopback and rejects remote/authenticated/non-WS/query URLs', () => {
-  for (const value of ['ws://127.0.0.1:9222/', 'ws://localhost:9333/', 'ws://[::1]:9222/devtools/browser/x']) {
+  for (const value of [
+    'ws://127.0.0.1:9222/',
+    'ws://localhost:9333/',
+    'ws://[::1]:9222/devtools/browser/x',
+  ]) {
     assert.equal(new URL(validateEndpoint(value)).protocol, 'ws:');
   }
   for (const value of [
-    'wss://localhost:9222/', 'http://localhost:9222/', 'ws://example.org/',
-    'ws://localhost.example.org/', 'ws://0.0.0.0:9222/', 'ws://192.168.1.1/',
-    'ws://user:secret@localhost:9222/', 'ws://localhost:9222/?token=secret',
-    'ws://localhost:9222/?', 'ws://localhost:9222/#', ' ws://localhost/',
-    'ws://localhost/\n', 'ws://localhost\\@example.org/', 'ws:localhost:9222', 'ws://localhost:0', '', null,
-  ]) assert.throws(() => validateEndpoint(value), undefined, String(value));
+    'wss://localhost:9222/',
+    'http://localhost:9222/',
+    'ws://example.org/',
+    'ws://localhost.example.org/',
+    'ws://0.0.0.0:9222/',
+    'ws://192.168.1.1/',
+    'ws://user:secret@localhost:9222/',
+    'ws://localhost:9222/?token=secret',
+    'ws://localhost:9222/?',
+    'ws://localhost:9222/#',
+    ' ws://localhost/',
+    'ws://localhost/\n',
+    'ws://localhost\\@example.org/',
+    'ws:localhost:9222',
+    'ws://localhost:0',
+    '',
+    null,
+  ])
+    assert.throws(() => validateEndpoint(value), undefined, String(value));
 });
 
 test('DevToolsActivePort parser validates both lines and cannot redirect to a remote endpoint', () => {
-  assert.equal(readDevToolsEndpoint('chosen', () => '9222\r\n/devtools/browser/a-b_1\r\n'), 'ws://127.0.0.1:9222/devtools/browser/a-b_1');
-  for (const contents of ['0\n/devtools/browser/x', '65536\n/devtools/browser/x', '1.5\n/devtools/browser/x',
-    '9222\n//example.org/', '9222\n/devtools/browser/x?secret', '9222\n/devtools/browser/x\nextra', '9222']) {
+  assert.equal(
+    readDevToolsEndpoint('chosen', () => '9222\r\n/devtools/browser/a-b_1\r\n'),
+    'ws://127.0.0.1:9222/devtools/browser/a-b_1',
+  );
+  for (const contents of [
+    '0\n/devtools/browser/x',
+    '65536\n/devtools/browser/x',
+    '1.5\n/devtools/browser/x',
+    '9222\n//example.org/',
+    '9222\n/devtools/browser/x?secret',
+    '9222\n/devtools/browser/x\nextra',
+    '9222',
+  ]) {
     assert.throws(() => readDevToolsEndpoint('chosen', () => contents));
   }
 });
 
 test('configuration precedence is explicit and no personal browser path is assumed', () => {
-  const env = { CDP_ENDPOINT: 'ws://localhost:1', CDP_RELAY_URL: 'ws://localhost:2', CHROME_USER_DATA_DIR: 'env-dir' };
-  const noRead = () => { throw new Error('must not read profile'); };
-  assert.equal(resolveConnectionConfig('arg-dir', { env, endpoint: 'ws://localhost:3', readFile: noRead }).endpoint, 'ws://localhost:3/');
+  const env = {
+    CDP_ENDPOINT: 'ws://localhost:1',
+    CDP_RELAY_URL: 'ws://localhost:2',
+    CHROME_USER_DATA_DIR: 'env-dir',
+  };
+  const noRead = () => {
+    throw new Error('must not read profile');
+  };
+  assert.equal(
+    resolveConnectionConfig('arg-dir', { env, endpoint: 'ws://localhost:3', readFile: noRead }).endpoint,
+    'ws://localhost:3/',
+  );
   assert.equal(resolveConnectionConfig(undefined, { env, readFile: noRead }).source, 'CDP_ENDPOINT');
-  assert.equal(resolveConnectionConfig(undefined, { env: { CDP_RELAY_URL: env.CDP_RELAY_URL }, readFile: noRead }).source, 'CDP_RELAY_URL');
+  assert.equal(
+    resolveConnectionConfig(undefined, { env: { CDP_RELAY_URL: env.CDP_RELAY_URL }, readFile: noRead })
+      .source,
+    'CDP_RELAY_URL',
+  );
   const seen = [];
   const config = resolveConnectionConfig('positional', {
-    env, userDataDir: 'option-dir',
-    readFile(path) { seen.push(path); return '9222\n/devtools/browser/x'; },
+    env,
+    userDataDir: 'option-dir',
+    readFile(path) {
+      seen.push(path);
+      return '9222\n/devtools/browser/x';
+    },
   });
   assert.match(seen[0], /option-dir/);
   assert.equal(config.source, 'DevToolsActivePort');
@@ -97,21 +158,41 @@ test('configuration precedence is explicit and no personal browser path is assum
 
 test('connect probes protocol and rejects error or malformed probe responses', async () => {
   for (const failure of ['error', 'malformed']) {
-    const Fake = transport((ws, request) => ws.reply(request, {}, failure === 'error' ? { message: 'unsupported method' } : undefined));
-    await assert.rejects(connect(undefined, { endpoint: 'ws://localhost:9222/', env: {}, WebSocketClass: Fake }), /unsupported method|Invalid CDP/);
+    const Fake = transport((ws, request) =>
+      ws.reply(request, {}, failure === 'error' ? { message: 'unsupported method' } : undefined),
+    );
+    await assert.rejects(
+      connect(undefined, { endpoint: 'ws://localhost:9222/', env: {}, WebSocketClass: Fake }),
+      /unsupported method|Invalid CDP/,
+    );
     const ws = Fake.instances[0];
     assert.equal(ws.readyState, 3);
-    for (const event of ['open', 'close', 'error', 'message']) assert.equal(getEventListeners(ws, event).length, 0);
+    for (const event of ['open', 'close', 'error', 'message'])
+      assert.equal(getEventListeners(ws, event).length, 0);
   }
 });
 
 test('handshake timeout, error, and abort close the socket and remove listeners', async () => {
   const Fake = transport(null, { autoOpen: false });
-  await assert.rejects(connect(undefined, { endpoint: 'ws://localhost:9222/', env: {}, WebSocketClass: Fake, connectTimeoutMs: 15 }), /connect timeout/);
+  await assert.rejects(
+    connect(undefined, {
+      endpoint: 'ws://localhost:9222/',
+      env: {},
+      WebSocketClass: Fake,
+      connectTimeoutMs: 15,
+    }),
+    /connect timeout/,
+  );
   assert.equal(Fake.instances[0].readyState, 3);
-  for (const event of ['open', 'close', 'error']) assert.equal(getEventListeners(Fake.instances[0], event).length, 0);
+  for (const event of ['open', 'close', 'error'])
+    assert.equal(getEventListeners(Fake.instances[0], event).length, 0);
   const control = new AbortController();
-  const pending = connect(undefined, { endpoint: 'ws://localhost:9222/', env: {}, WebSocketClass: Fake, signal: control.signal });
+  const pending = connect(undefined, {
+    endpoint: 'ws://localhost:9222/',
+    env: {},
+    WebSocketClass: Fake,
+    signal: control.signal,
+  });
   control.abort();
   await assert.rejects(pending, { name: 'AbortError' });
   assert.equal(getEventListeners(control.signal, 'abort').length, 0);
@@ -124,9 +205,15 @@ test('pre-aborted connect creates no socket', async () => {
   const Fake = transport();
   const control = new AbortController();
   control.abort();
-  await assert.rejects(connect(undefined, {
-    endpoint: 'ws://localhost:9222/', env: {}, WebSocketClass: Fake, signal: control.signal,
-  }), { name: 'AbortError' });
+  await assert.rejects(
+    connect(undefined, {
+      endpoint: 'ws://localhost:9222/',
+      env: {},
+      WebSocketClass: Fake,
+      signal: control.signal,
+    }),
+    { name: 'AbortError' },
+  );
   assert.equal(Fake.instances.length, 0);
 });
 
@@ -153,7 +240,8 @@ test('close and socket error reject outstanding requests immediately', async (t)
     cdp.ws.dispatchEvent(new Event(mode));
     await assert.rejects(pending, /CDP connection closed/);
     await assert.rejects(cdp.call('Anything'), /not connected/);
-    for (const event of ['close', 'error', 'message']) assert.equal(getEventListeners(cdp.ws, event).length, 0);
+    for (const event of ['close', 'error', 'message'])
+      assert.equal(getEventListeners(cdp.ws, event).length, 0);
   }
 });
 
@@ -175,14 +263,18 @@ test('concurrent attach calls share one request and use sessionId on page method
   const values = await Promise.all([cdp.evaluate('target', '1'), cdp.evaluate('target', '2')]);
   assert.deepEqual(values, [42, 42]);
   assert.equal(cdp.ws.sent.filter((request) => request.method === 'Target.attachToTarget').length, 1);
-  for (const request of cdp.ws.sent.filter((request) => request.method === 'Runtime.evaluate')) assert.equal(request.sessionId, 's1');
+  for (const request of cdp.ws.sent.filter((request) => request.method === 'Runtime.evaluate'))
+    assert.equal(request.sessionId, 's1');
 });
 
 test('response with another sessionId cannot satisfy a pending page request', async (t) => {
   let evaluation;
   const cdp = await client(t, (ws, request) => {
     if (request.method === 'Target.attachToTarget') ws.reply(request, { sessionId: 's1' });
-    if (request.method === 'Runtime.evaluate') { evaluation = request; ws.message({ id: request.id, sessionId: 's-other', result: { result: { value: 'wrong' } } }); }
+    if (request.method === 'Runtime.evaluate') {
+      evaluation = request;
+      ws.message({ id: request.id, sessionId: 's-other', result: { result: { value: 'wrong' } } });
+    }
   });
   const pending = cdp.evaluate('target', '1');
   await sleep(1);
@@ -238,7 +330,9 @@ test('attach event followed by detach rejects concurrent waiters without waiting
 
 test('cancelled attach cannot repopulate session cache from a late attached event', async (t) => {
   let requests = [];
-  const cdp = await client(t, (ws, request) => { requests.push(request); });
+  const cdp = await client(t, (ws, request) => {
+    requests.push(request);
+  });
   const control = new AbortController();
   const first = cdp.session('target', { signal: control.signal });
   control.abort();
@@ -252,7 +346,9 @@ test('cancelled attach cannot repopulate session cache from a late attached even
 
 test('one cancelled attach waiter does not cancel other concurrent waiters', async (t) => {
   let attachRequest;
-  const cdp = await client(t, (ws, request) => { attachRequest = request; });
+  const cdp = await client(t, (ws, request) => {
+    attachRequest = request;
+  });
   const control = new AbortController();
   const first = cdp.session('target', { signal: control.signal });
   const second = cdp.session('target');
@@ -296,7 +392,10 @@ test('waitFor returns true, bounds recurring errors and immediately propagates f
   });
   assert.equal(await cdp.waitFor('target', 'condition'), true);
   mode = 'retry';
-  await assert.rejects(cdp.waitFor('target', 'condition', { intervalMs: 1, maxConsecutiveErrors: 2 }), /2 consecutive/);
+  await assert.rejects(
+    cdp.waitFor('target', 'condition', { intervalMs: 1, maxConsecutiveErrors: 2 }),
+    /2 consecutive/,
+  );
   mode = 'fatal';
   await assert.rejects(cdp.waitFor('target', 'condition'), /Target closed/);
   assert.equal(FATAL_RE.test('CDP connection closed'), true);
@@ -306,7 +405,8 @@ test('waitFor aborts during attach and polling sleep without leaving signal list
   for (const mode of ['attach', 'sleep']) {
     const control = new AbortController();
     const cdp = await client(t, (ws, request) => {
-      if (mode === 'sleep' && request.method === 'Target.attachToTarget') ws.reply(request, { sessionId: 's' });
+      if (mode === 'sleep' && request.method === 'Target.attachToTarget')
+        ws.reply(request, { sessionId: 's' });
       if (request.method === 'Runtime.evaluate') ws.reply(request, { result: { value: false } });
     });
     const pending = cdp.waitFor('target', 'condition', { signal: control.signal, intervalMs: 5000 });
@@ -329,11 +429,17 @@ test('closing or aborting work leaves no transport-owned request or attach timer
   const nativeSetTimeout = globalThis.setTimeout;
   const nativeClearTimeout = globalThis.clearTimeout;
   t.mock.method(globalThis, 'setTimeout', (callback, delay, ...args) => {
-    const handle = nativeSetTimeout(() => { active.delete(handle); callback(...args); }, delay);
+    const handle = nativeSetTimeout(() => {
+      active.delete(handle);
+      callback(...args);
+    }, delay);
     active.add(handle);
     return handle;
   });
-  t.mock.method(globalThis, 'clearTimeout', (handle) => { active.delete(handle); nativeClearTimeout(handle); });
+  t.mock.method(globalThis, 'clearTimeout', (handle) => {
+    active.delete(handle);
+    nativeClearTimeout(handle);
+  });
   const cdp = await client(t);
   const attach = cdp.session('target');
   const request = cdp.call('Never.responds');

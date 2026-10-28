@@ -2,7 +2,7 @@
 
 面向 AI 代理的网课辅助 skill，附带零运行时依赖的中国大学 MOOC CLI。用于读取课程状态、审阅成绩规则、检查考试入口，以及按已确认的计划提交讨论回复。
 
-本目录是可独立移出的项目根目录，按 [MIT 许可证](LICENSE) 授权。当前源码已同步到所有者的私有 GitHub 仓库用于 CI，尚未公开，也未发布 npm 包。真实平台接口与页面结构可能变化；**离线测试通过不代表当前课程或账号已完成真实平台验证**。
+本目录是可独立移出的项目根目录，按 [MIT 许可证](LICENSE) 授权。GitHub 源码仓库已公开；尚未发布 GitHub Release 或 npm 包。真实平台接口与页面结构可能变化；**离线测试通过不代表当前课程或账号已完成真实平台验证**。
 
 ## 当前能力
 
@@ -29,7 +29,7 @@ npm run check
 npm test
 ```
 
-没有需要下载的项目依赖。`npm ci` 用于验证清单与锁文件一致。作为 skill 使用时，将整个目录放入代理支持的 skills 目录，并让代理读取 [SKILL.md](SKILL.md)；CLI 也可以独立使用。没有安装钩子，不自动修改代理配置。
+运行时没有第三方依赖；`npm ci` 仅安装锁定的开发格式工具并验证清单一致。作为 skill 使用时，将审查过的候选包解压到代理支持的 skills 目录，并让代理读取 [SKILL.md](SKILL.md)；CLI 也可以独立使用。没有安装钩子，不自动修改代理配置。
 
 ### 准备浏览器
 
@@ -155,4 +155,6 @@ node scripts/icourse163.mjs videos --course 123456 --term 654321 --execute --rul
 
 运行 `npm run check`、`npm test`、`npm run test:coverage` 和 `npm pack --dry-run`。本次结果见 [验收记录](docs/TEST_REPORT.md)，验证边界见 [测试说明](docs/TESTING.md)，提交规范见 [CONTRIBUTING.md](CONTRIBUTING.md)，敏感数据报告见 [SECURITY.md](SECURITY.md)。
 
-本包采用 [MIT 许可证](LICENSE)，`private: true` 用于防止误发 npm，不限制按 MIT 条款公开源码。[GitHub 仓库](https://github.com/WhatYearIsNow/online-course-booster) 当前为私有，用于所有者验收；公开前仍需确认署名、第三方来源及 Git 历史。本项目没有自动发布工作流。
+本包采用 [MIT 许可证](LICENSE)，`private: true` 用于防止误发 npm，不限制按 MIT 条款公开源码。[GitHub 仓库](https://github.com/WhatYearIsNow/online-course-booster) 已公开。本项目没有自动发布工作流；候选构建、公开 Release 和本地安装切换分别执行。
+
+开发、测试、候选构建和回退约定见[维护流程](MAINTENANCE.md)。

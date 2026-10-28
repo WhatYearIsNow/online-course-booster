@@ -13,10 +13,20 @@ function positiveInteger(value) {
 export function parseCourseUrl(value) {
   if (typeof value !== 'string' || value !== value.trim() || /[\u0000-\u0020\\]/u.test(value)) return null;
   let url;
-  try { url = new URL(value); } catch { return null; }
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
   if (value.match(/^https:\/\/([^/?#]+)/i)?.[1].includes('@')) return null;
-  if (url.protocol !== 'https:' || !['icourse163.org', 'www.icourse163.org'].includes(url.hostname)
-    || url.username || url.password || url.port) return null;
+  if (
+    url.protocol !== 'https:' ||
+    !['icourse163.org', 'www.icourse163.org'].includes(url.hostname) ||
+    url.username ||
+    url.password ||
+    url.port
+  )
+    return null;
   const rawPath = value.match(/^https:\/\/[^/?#]+([^?#]*)/i)?.[1] || '';
   if (rawPath !== url.pathname) return null;
   const match = url.pathname.match(/^\/((?:spoc|mooc)\/)?learn\/([A-Za-z0-9]+)-([1-9]\d*)(?:\/content)?\/?$/);
@@ -60,7 +70,7 @@ export function buildDwrBody({ pid, html, httpSessionId, scriptSessionId, batchI
     'c0-e3=number:0',
     'c0-param0=Object_Object:{postId:reference:c0-e1,content:reference:c0-e2,anonymous:reference:c0-e3}',
     'c0-param1=Array:[]',
-    'batchId=' + batch
+    'batchId=' + batch,
   ].join('\n');
 }
 
@@ -69,10 +79,15 @@ export function buildDwrBody({ pid, html, httpSessionId, scriptSessionId, batchI
 function tokenize(source) {
   const tokens = [];
   let i = 0;
-  const fail = () => { throw new Error('invalid DWR syntax'); };
+  const fail = () => {
+    throw new Error('invalid DWR syntax');
+  };
   while (i < source.length) {
     const char = source[i];
-    if (/\s/u.test(char)) { i++; continue; }
+    if (/\s/u.test(char)) {
+      i++;
+      continue;
+    }
     if (source.startsWith('//', i)) {
       while (i < source.length && !/[\r\n\u2028\u2029]/u.test(source[i])) i++;
       continue;
@@ -85,16 +100,23 @@ function tokenize(source) {
     }
     if (char === '"' || char === "'") {
       const quote = char;
-      let value = '', closed = false;
+      let value = '',
+        closed = false;
       i++;
       while (i < source.length) {
         const next = source[i++];
-        if (next === quote) { closed = true; break; }
+        if (next === quote) {
+          closed = true;
+          break;
+        }
         if (/[\r\n\u2028\u2029]/u.test(next)) fail();
-        if (next !== '\\') { value += next; continue; }
+        if (next !== '\\') {
+          value += next;
+          continue;
+        }
         if (i >= source.length) fail();
         const escaped = source[i++];
-        const simple = { n: '\n', r: '\r', t: '\t', b: '\b', f: '\f', v: '\v', '0': '\0' };
+        const simple = { n: '\n', r: '\r', t: '\t', b: '\b', f: '\f', v: '\v', 0: '\0' };
         if (escaped === 'x' || escaped === 'u') {
           const size = escaped === 'x' ? 2 : 4;
           const hex = source.slice(i, i + size);
@@ -106,7 +128,8 @@ function tokenize(source) {
         } else if (Object.hasOwn(simple, escaped)) {
           if (escaped === '0' && /[0-9]/.test(source[i] || '')) fail();
           value += simple[escaped];
-        } else if (escaped === '\\' || escaped === '"' || escaped === "'" || escaped === '/') value += escaped;
+        } else if (escaped === '\\' || escaped === '"' || escaped === "'" || escaped === '/')
+          value += escaped;
         else fail();
       }
       if (!closed) fail();
@@ -123,7 +146,8 @@ function tokenize(source) {
         tokens.push({ type: 'identifier', value: identifier[0] });
         i += identifier[0].length;
       } else if ('{}[]():;,=.'.includes(char)) {
-        tokens.push({ type: 'punctuation', value: char }); i++;
+        tokens.push({ type: 'punctuation', value: char });
+        i++;
       } else fail();
     }
     if (tokens.length > 100_000) fail();
@@ -133,11 +157,12 @@ function tokenize(source) {
 
 function readDwr(source) {
   const tokens = tokenize(source);
-  const variables = new Map(), calls = [];
+  const variables = new Map(),
+    calls = [];
   let position = 0;
   const peek = () => tokens[position];
-  const matches = (token, value) => token?.value === value
-    && token.type === ('{}[]():;,=.'.includes(value) ? 'punctuation' : 'identifier');
+  const matches = (token, value) =>
+    token?.value === value && token.type === ('{}[]():;,=.'.includes(value) ? 'punctuation' : 'identifier');
   const take = (value) => {
     const token = tokens[position++];
     if (!token || (value !== undefined && !matches(token, value))) throw new Error('invalid DWR syntax');
@@ -145,12 +170,16 @@ function readDwr(source) {
   };
   const maybe = (value) => {
     if (!matches(peek(), value)) return false;
-    position++; return true;
+    position++;
+    return true;
   };
   const key = () => {
     const token = take();
-    if (!['identifier', 'string', 'number'].includes(token.type)
-      || ['__proto__', 'constructor', 'prototype'].includes(String(token.value))) throw new Error('invalid property');
+    if (
+      !['identifier', 'string', 'number'].includes(token.type) ||
+      ['__proto__', 'constructor', 'prototype'].includes(String(token.value))
+    )
+      throw new Error('invalid property');
     return token.value;
   };
   const value = (depth = 0) => {
@@ -164,7 +193,8 @@ function readDwr(source) {
       const object = Object.create(null);
       if (!maybe('}')) {
         do {
-          const name = key(); take(':');
+          const name = key();
+          take(':');
           if (Object.hasOwn(object, name)) throw new Error('duplicate DWR property');
           object[name] = value(depth + 1);
         } while (maybe(','));
@@ -175,17 +205,21 @@ function readDwr(source) {
     if (token.value === '[') {
       const array = [];
       if (!maybe(']')) {
-        do { array.push(value(depth + 1)); } while (maybe(','));
+        do {
+          array.push(value(depth + 1));
+        } while (maybe(','));
         take(']');
       }
       return array;
     }
     if (token.value === 'new') {
       // Common DWR dates remain inert data; do not instantiate response objects.
-      take('Date'); take('(');
+      take('Date');
+      take('(');
       const timestamp = take();
       if (timestamp.type !== 'number') throw new Error('invalid DWR date');
-      take(')'); return { timestamp: timestamp.value };
+      take(')');
+      return { timestamp: timestamp.value };
     }
     if (token.type === 'identifier' && variables.has(token.value)) return variables.get(token.value);
     throw new Error('unsupported DWR value');
@@ -196,8 +230,10 @@ function readDwr(source) {
     if (maybe('var')) {
       do {
         const name = take();
-        if (name.type !== 'identifier' || !/^s\d+$/.test(name.value) || variables.has(name.value)) throw new Error('invalid DWR variable');
-        take('='); variables.set(name.value, value());
+        if (name.type !== 'identifier' || !/^s\d+$/.test(name.value) || variables.has(name.value))
+          throw new Error('invalid DWR variable');
+        take('=');
+        variables.set(name.value, value());
       } while (maybe(','));
     } else {
       const root = take();
@@ -205,8 +241,10 @@ function readDwr(source) {
       const path = [];
       while (true) {
         if (maybe('.')) path.push(key());
-        else if (maybe('[')) { path.push(key()); take(']'); }
-        else break;
+        else if (maybe('[')) {
+          path.push(key());
+          take(']');
+        } else break;
       }
       if (maybe('=')) {
         if (!variables.has(root.value) || !path.length) throw new Error('invalid DWR assignment');
@@ -227,7 +265,9 @@ function readDwr(source) {
         take('(');
         const args = [];
         if (!maybe(')')) {
-          do { args.push(value()); } while (maybe(','));
+          do {
+            args.push(value());
+          } while (maybe(','));
           take(')');
         }
         // A callback observes the payload at call time, before any later assignment.
@@ -252,8 +292,11 @@ export function parseDwrResponse(response, { batchId, callId = 0 } = {}) {
     const calls = readDwr(response);
     const selected = calls.filter(({ name, args }) => {
       if (!['string', 'number'].includes(typeof args[0]) || !['string', 'number'].includes(typeof args[1])) {
-        return name === '_remoteHandleBatchException' && ['string', 'number'].includes(typeof args[0])
-          && (batchId === undefined || String(args[0]) === String(batchId));
+        return (
+          name === '_remoteHandleBatchException' &&
+          ['string', 'number'].includes(typeof args[0]) &&
+          (batchId === undefined || String(args[0]) === String(batchId))
+        );
       }
       if (batchId !== undefined && String(args[0]) !== String(batchId)) return false;
       return name === '_remoteHandleBatchException' || String(args[1]) === String(callId);
@@ -266,11 +309,18 @@ export function parseDwrResponse(response, { batchId, callId = 0 } = {}) {
       return { ok: false, reason: 'invalid DWR callback payload' };
     }
     if (Object.hasOwn(payload, 'javaClassName')) return { ok: false, reason: 'DWR exception' };
-    if (!Object.hasOwn(payload, 'id') || typeof payload.id !== 'number' || positiveInteger(payload.id) === null) {
+    if (
+      !Object.hasOwn(payload, 'id') ||
+      typeof payload.id !== 'number' ||
+      positiveInteger(payload.id) === null
+    ) {
       return { ok: false, reason: 'missing or invalid reply id' };
     }
     return { ok: true, replyId: payload.id };
   } catch (error) {
-    return { ok: false, reason: error.message === 'DWR exception' ? 'DWR exception' : 'unsupported or invalid DWR response' };
+    return {
+      ok: false,
+      reason: error.message === 'DWR exception' ? 'DWR exception' : 'unsupported or invalid DWR response',
+    };
   }
 }

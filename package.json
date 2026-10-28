@@ -5,16 +5,36 @@
   "private": true,
   "license": "MIT",
   "type": "module",
-  "engines": { "node": ">=22.15.0" },
+  "engines": {
+    "node": ">=22.15.0"
+  },
   "scripts": {
     "check": "node scripts/check-release.mjs",
     "test": "node scripts/run-tests.mjs",
     "test:coverage": "node scripts/run-tests.mjs --experimental-test-coverage",
     "test:browser": "node scripts/browser-smoke.mjs",
-    "prepublishOnly": "npm run check"
+    "prepublishOnly": "npm run check",
+    "format": "prettier --write \"scripts/**/*.mjs\" \"test/**/*.mjs\"",
+    "format:check": "prettier --check \"scripts/**/*.mjs\" \"test/**/*.mjs\"",
+    "format:verify": "prettier --debug-check \"scripts/**/*.mjs\" \"test/**/*.mjs\""
   },
   "files": [
-    "SKILL.md", "README.md", "LICENSE", "CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md",
-    "platforms/", "references/", "docs/", "scripts/", "examples/", "test/", "evals/"
-  ]
+    "SKILL.md",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "platforms/",
+    "references/",
+    "docs/",
+    "scripts/",
+    "examples/",
+    "test/",
+    "evals/",
+    "MAINTENANCE.md"
+  ],
+  "devDependencies": {
+    "prettier": "3.6.2"
+  }
 }
