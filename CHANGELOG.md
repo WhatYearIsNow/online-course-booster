@@ -1,6 +1,8 @@
 # 变更记录
 
-## Unreleased — 超星学习广场
+## 0.2.0 — 2026-10-29
+
+### 超星学习广场
 
 - 新增 `scripts/chaoxing.mjs` 与 `scripts/lib/chaoxing.mjs`：`status`、`chapters` 只读；`quiz`、`run` 默认预览，`--submit --confirm DIGEST` 才提交。
 - 作答策略只有启发式 `--strategy first`（判断/单选选第 1 项，多选选前 2 项），不读题干、不使用答案库。
@@ -8,7 +10,7 @@
 - 真实实测：受管 headless 登录、积分读取、单章提交（1 → 7）、批量提交（13 → 21）、完整批量（21 → 801，答题 800）；确认超星鉴权 cookie 为会话型，重启实例需重新登录。
 - 新增 12 项离线回归，覆盖 URL/解析/摘要/参数校验与只读 CLI。
 
-## Unreleased — 受管浏览器
+### 受管浏览器
 
 - 新增受管浏览器：`scripts/browser.mjs status|start|open|stop` 与 `scripts/lib/launch.mjs`。使用独立资料目录与动态回环调试端口，进程与 CLI 分离，不读取、不复制、不修改日常浏览器资料。
 - MOOC CLI 新增 `--managed`、`--headless`、`--data-dir`、`--browser`；提供 `--school` 时可在空实例中打开对应学习页，再按课程与学期选择。
@@ -16,13 +18,13 @@
 - 真实隔离实测：受管 headless 实例完成超星登录、进入形势与政策广场并读取积分接口；确认超星鉴权 cookie 为会话型，重启实例后需重新登录。
 - 新增 19 项离线回归，覆盖受管生命周期、参数互斥与 browser CLI。
 
-## Unreleased maintenance
+### 维护
 
 - 固定开发格式工具并接入现有 CI；补充隔离验证、候选构建、健康检查、代码/数据回退边界与源码阅读路线。运行接口与数据格式保持不变。
 
-## Unreleased
+## 0.1.0 — 首次公开
 
-本次为首次公开前的工作区重构，尚未发布。
+本次为首次公开前的工作区重构。
 
 - Windows Node 22/24 各 188 项回归通过；测试夹具改用每次运行独立的工作区临时目录。
 - 成绩规则读取等待正文，未发布标准返回 NOT_PUBLISHED；补充真实只读验收记录。
