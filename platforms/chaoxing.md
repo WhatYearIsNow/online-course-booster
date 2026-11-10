@@ -45,6 +45,13 @@ node scripts/chaoxing.mjs run      --course-id ID --class-id ID --target 800 --m
 - 单学习标签页：`run` 只复用一个学习页，避免「账号已在其他页面学习」。
 - 日志默认 `.local/journals/chaoxing-<digest>.jsonl`，已存在时拒绝重跑。继续未完成的批量任务时用新的 `--journal` 路径；平台已完成的测评会显示「已完成」，据此跳过。换日志路径或新摘要不是全局幂等保证。
 
+## 班级解析与入班信号（2026-11-10 实测）
+
+- **classId 是账号相关的**：同一个广场课程（courseId）下，不同学生属于不同班级。复用其他账号的 classId 时，广场页会显示「您尚未报名，学习行为将不计分」横幅，`modify-node` 返回 `mode=preview、classId=""`——章节全部只读、无测评、不计分。
+- **自动解析**：打开不带 classId 的广场页（`/plaza/?courseId=<courseId>`），服务端按当前账号解析班级，`window.classId` 即为该账号的正确班级。CLI 的 `--class-id` 因此可选；省略时自动解析，解析不到即报错。
+- **入班守卫**：显式传入不属于当前账号的 classId 时，`run`/`quiz` 在动手前报错并给出指引；`status`/`chapters` 照常只读并在输出中带 `enrolled` 字段。run/quiz 不会在未入班时把章节静默跳过。
+- 报名接口 `user/<courseId>/add-course-class-user?classId=...&fid=...` 对关闭自助报名的课程返回 `{code:0,data:{msg:"课程不允许报名"}}`；入班只能由老师/管理员导入或用邀请链接。
+
 ## 2026-10-28 实测记录
 
 环境：Windows、Node 24、Chrome 155、受管 headless 实例。

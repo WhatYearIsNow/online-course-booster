@@ -19,6 +19,7 @@ import {
   validateQuizPlan,
   validateRunPlan,
   readIdentity,
+  readEnrollment,
   readScore,
   readClassifyIds,
   readChapterIds,
@@ -33,15 +34,16 @@ import {
 } from './lib/chaoxing.mjs';
 
 const HELP = `超星学习通（形势与政策广场）工具（Node.js >=22.15）
-用法: node scripts/chaoxing.mjs <command> --course-id ID --class-id ID [options]
+用法: node scripts/chaoxing.mjs <command> --course-id ID [--class-id ID] [options]
 命令:
-  status                     只读：身份、总积分、达标线与分项规则
+  status                     只读：身份、总积分、达标线、分项规则与入班状态
   chapters                   只读：列出知识点（章节）ID
   quiz --chapter ID          预览单章测评；--submit --confirm DIGEST 才提交
   run --target N             预览批量冲分计划；--submit --confirm DIGEST 才执行
 连接:
   --endpoint ws://... | --user-data-dir PATH | --managed [--headless] [--data-dir DIR] [--browser PATH]
-身份: --expect-user UID（可选，核对 window.userId）
+身份: --class-id 可选；省略时自动解析当前账号的班级，解析失败或未入班即报错
+      --expect-user UID（可选，核对 window.userId）
 范围: --classify IDS（逗号分隔；缺省从广场页读取） --max-chapters N（run 上限）
 输出: --plan FILE（保存/读取计划） --out FILE（结果，拒绝覆盖） --journal FILE
 其他: --strategy first（默认启发式） --timeout-ms MS --help
@@ -94,8 +96,10 @@ export function parseCli(argv) {
   const command = parsed.positionals[0];
   if (parsed.positionals.length !== 1 || !['status', 'chapters', 'quiz', 'run'].includes(command))
     throw new TaskError('需要一个有效命令，使用 --help 查看用法。', EXIT.ARGS);
-  if (!/^[1-9]\d*$/.test(values['course-id'] || '') || !/^[1-9]\d*$/.test(values['class-id'] || ''))
-    throw new TaskError('需要 --course-id 和 --class-id，均为正整数 ID。', EXIT.ARGS);
+  if (!/^[1-9]\d*$/.test(values['course-id'] || ''))
+    throw new TaskError('需要 --course-id，为正整数 ID。', EXIT.ARGS);
+  if (values['class-id'] !== undefined && !/^[1-9]\d*$/.test(values['class-id']))
+    throw new TaskError('--class-id 必须是正整数 ID；省略时自动解析当前账号的班级。', EXIT.ARGS);
   if (values['expect-user'] && !/^[1-9]\d*$/.test(values['expect-user']))
     throw new TaskError('--expect-user 无效。', EXIT.ARGS);
   if (values.classify && !/^[1-9]\d*(,[1-9]\d*)*$/.test(values.classify))
@@ -135,7 +139,7 @@ export function parseCli(argv) {
     timeoutMs,
     strategy,
     courseId: values['course-id'],
-    classId: values['class-id'],
+    classId: values['class-id'] ?? null,
     expectUser: values['expect-user'] ?? null,
     classifyIds: values.classify ? values.classify.split(',') : null,
     target: values.target === undefined ? null : Number(values.target),
@@ -185,11 +189,30 @@ async function openPlaza(client, options, signal) {
   const identity = await readIdentity(client, page.targetId);
   if (!identity.userId) throw new TaskError('未登录或登录已过期；请先在浏览器中完成登录。');
   if (identity.courseId !== options.courseId) throw new TaskError('广场页课程 ID 与 --course-id 不一致。');
-  if (identity.classId && identity.classId !== options.classId)
+  let classId = options.classId;
+  if (!classId) {
+    // The plaza resolves the caller's own class when opened without classId.
+    classId = identity.classId || '';
+    if (!/^[1-9]\d*$/.test(classId))
+      throw new TaskError(
+        '未能自动解析当前账号的班级：广场页未返回 classId。该账号可能未加入任何班级；' +
+          '请从课程链接（tsjy.chaoxing.com/plaza/?courseId=...&classId=...）取 classId 后用 --class-id 显式指定。',
+        EXIT.ENV,
+      );
+  } else if (identity.classId && identity.classId !== options.classId) {
     throw new TaskError('广场页班级 ID 与 --class-id 不一致。');
+  }
   if (options.expectUser && identity.userId !== options.expectUser)
     throw new TaskError('广场页用户 ID 与 --expect-user 不一致。');
-  return { targetId: page.targetId, identity };
+  const enrolled = await readEnrollment(client, page.targetId);
+  if (!enrolled && ['run', 'quiz'].includes(options.command))
+    throw new TaskError(
+      '当前账号在该课程下未入班（页面提示「您尚未报名」）。classId 是账号相关的，不能复用其他账号的值。' +
+        '请省略 --class-id 让工具自动解析；若仍失败，请从课程链接取当前账号的 classId，或让老师把账号加入班级。',
+      EXIT.ENV,
+    );
+  options.classId = classId;
+  return { targetId: page.targetId, identity: { ...identity, classId }, enrolled };
 }
 
 async function resolveClassify(client, targetId, options, identity) {
@@ -206,7 +229,7 @@ async function resolveClassify(client, targetId, options, identity) {
 async function status(client, targetId, options) {
   const score = await readScore(client, targetId, options.courseId, options.classId);
   if (!score) throw new TaskError('积分接口未返回有效数据。');
-  return { state: 'ok', score };
+  return { state: 'ok', score, classId: options.classId };
 }
 
 async function chapters(client, targetId, options, identity) {
@@ -425,9 +448,16 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
     const plaza = await openPlaza(client, options, controller.signal);
     let result;
     if (options.command === 'status')
-      result = { ...(await status(client, plaza.targetId, options)), identity: plaza.identity };
+      result = {
+        ...(await status(client, plaza.targetId, options)),
+        identity: plaza.identity,
+        enrolled: plaza.enrolled,
+      };
     else if (options.command === 'chapters')
-      result = await chapters(client, plaza.targetId, options, plaza.identity);
+      result = {
+        ...(await chapters(client, plaza.targetId, options, plaza.identity)),
+        enrolled: plaza.enrolled,
+      };
     else if (options.command === 'quiz')
       result = await quiz(client, plaza.targetId, options, controller.signal);
     else result = await run(client, plaza.targetId, options, controller.signal);

@@ -110,6 +110,22 @@ export function parseQuizResult(text) {
   return { done: /已完成|已提交/.test(body), score: match ? Number(match[1]) : null };
 }
 
+/**
+ * The plaza shows a warning banner for accounts that are not part of the class.
+ * classId is account-specific, so a banner here usually means the caller passed
+ * a classId that belongs to a different account (observed 2026-11-10).
+ */
+export function enrolledFromBanner(text) {
+  return !/尚未报名/.test(String(text ?? ''));
+}
+
+/** `modify-node` echo: enrolled accounts get mode=study plus a non-empty classId. */
+export function enrolledFromNode(node) {
+  if (!node || typeof node !== 'object') return null;
+  if (node.mode !== 'study') return false;
+  return Boolean(node.classId && node.classId !== '');
+}
+
 const BLOCK_RULES = [
   [/请输入验证码|拖动滑块|滑块验证|完成验证|安全验证/, 'captcha'],
   [/操作频繁|请求过于频繁|稍后再试/, 'rate-limited'],
@@ -208,6 +224,12 @@ export async function readIdentity(cdp, targetId) {
       personId: String(window.personId || ''),
     }))()`,
   );
+}
+
+/** Read-only banner probe; the plaza renders it for accounts outside the class. */
+export async function readEnrollment(cdp, targetId) {
+  const text = await cdp.evaluate(targetId, `(() => (document.body.innerText || '').slice(0, 2000))()`);
+  return enrolledFromBanner(text);
 }
 
 export async function readScore(cdp, targetId, courseId, classId) {

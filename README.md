@@ -207,6 +207,7 @@ node scripts/chaoxing.mjs run --course-id 123456 --class-id 654321 --target 800 
 `123456` / `654321` / `789012` 都是**合成示例**，必须替换为当前账号课程页中的真实 ID。
 
 - 连接参数与 MOOC CLI 一致：`--endpoint`、`--user-data-dir`，或 `--managed [--headless] [--data-dir DIR] [--browser PATH]`。
+- `--class-id` 可选：省略时工具打开不带 classId 的广场页，由服务端自动解析当前账号的班级；解析不到（未入班）即报错。显式传入不属于当前账号的 classId 时，`run`/`quiz` 会先报错而不是把章节静默跳过。`status` 输出带 `enrolled` 字段。
 - `--expect-user` 可核对 `window.userId`；`--classify` 可显式指定分类 ID。
 - 作答策略只有 `--strategy first`：判断题/单选题选第 1 项，多选题选前 2 项。**不读题干、不用答案库**，不保证达到目标分。
 - 摘要绑定课程、班级、章节与题目结构；页面变化会拒绝提交。提交不自动重试，风控或结果含糊时写 `uncertain` 并停止。

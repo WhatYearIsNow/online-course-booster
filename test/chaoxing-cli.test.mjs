@@ -4,7 +4,7 @@ import { main, parseCli } from '../scripts/chaoxing.mjs';
 
 const identity = ['--course-id', '100', '--class-id', '200'];
 
-function fakeClient({ userId = '900', courseId = '100', classId = '200', score = {} } = {}) {
+function fakeClient({ userId = '900', courseId = '100', classId = '200', score = {}, banner = null } = {}) {
   return {
     closed: false,
     close() {
@@ -22,6 +22,7 @@ function fakeClient({ userId = '900', courseId = '100', classId = '200', score =
       if (expression.includes('window.userId')) return { userId, courseId, classId, personId: '1' };
       if (expression.includes('user-score-detail'))
         return { data: { totalScore: 1, courseMinScore: 800, dayScore: 1, items: [], ...score } };
+      if (banner && expression.includes('document.body.innerText')) return banner;
       return null;
     },
   };
@@ -91,5 +92,56 @@ test('未登录或身份不符时阻断', async () => {
       errorOutput() {},
     }),
     2,
+  );
+});
+
+test('省略 --class-id 时自动解析当前账号的班级', async () => {
+  let output;
+  const code = await main(['status', '--course-id', '100'], {
+    connect: async () => fakeClient(),
+    output: (value) => (output = value),
+  });
+  assert.equal(code, 0);
+  assert.equal(output.classId, '200');
+  assert.equal(output.enrolled, true);
+});
+
+test('自动解析失败（未入班）时阻断 run', async () => {
+  const client = fakeClient({ classId: '', banner: '您尚未报名，学习行为将不计分' });
+  assert.equal(
+    await main(['run', '--course-id', '100', '--target', '800'], {
+      connect: async () => client,
+      errorOutput() {},
+    }),
+    2,
+  );
+});
+
+test('显式 classId 未入班时 run 阻断', async () => {
+  const client = fakeClient({ banner: '您尚未报名，学习行为将不计分' });
+  assert.equal(
+    await main(['run', ...identity, '--target', '800'], {
+      connect: async () => client,
+      errorOutput() {},
+    }),
+    2,
+  );
+});
+
+test('status 报告入班状态（横幅存在时 enrolled=false）', async () => {
+  let output;
+  const code = await main(['status', ...identity], {
+    connect: async () => fakeClient({ banner: '您尚未报名，学习行为将不计分' }),
+    output: (value) => (output = value),
+  });
+  assert.equal(code, 0);
+  assert.equal(output.enrolled, false);
+});
+
+test('class-id 可选且必须是正整数', () => {
+  assert.equal(parseCli(['status', '--course-id', '100']).classId, null);
+  assert.throws(
+    () => parseCli(['status', '--course-id', '100', '--class-id', '0']),
+    (error) => error.code === 1,
   );
 });

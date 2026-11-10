@@ -23,6 +23,7 @@
 | `Managed browser exited during startup` | 无显示环境却用了有窗口模式 | 加 `--headless` |
 | `did not become connectable within ...ms` | 启动慢、安全软件拦截、资料目录不可写 | 先 `status`，换可写 `--data-dir`，必要时手动核对 |
 | 重启后需要重新登录 | 平台鉴权 cookie 是会话型 | 保持受管实例运行；或按平台正规流程重新登录 |
+| 未入班 / classId 不属于当前账号 | classId 是账号相关的；广场页会显示「您尚未报名」 | 省略 `--class-id` 自动解析，或从课程链接取当前账号的 classId；入班由老师导入 |
 | `open` 返回 `expect-timeout`（退出码 3） | 页面条件未满足（未登录、加载慢、选择器变化） | 加 `--screenshot` 看页面；不能当作成功 |
 | 受管实例残留 | 未执行 `stop` | `node scripts/browser.mjs stop --data-dir DIR` |
 
