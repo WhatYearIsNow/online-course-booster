@@ -7,7 +7,16 @@
 import { parseArgs } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import { resolve, join, dirname } from 'node:path';
-import { openSync, writeSync, fsyncSync, closeSync, mkdirSync } from 'node:fs';
+import {
+  openSync,
+  writeSync,
+  fsyncSync,
+  closeSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  existsSync,
+} from 'node:fs';
 import { connect } from './cdp.mjs';
 import { ensureManagedBrowser } from './lib/launch.mjs';
 import { EXIT, TaskError, readJson, writeJsonExclusive, reserveJson } from './lib/workflow.mjs';
@@ -29,6 +38,11 @@ import {
   inspectQuiz,
   answerQuiz,
   submitQuiz,
+  emptyBank,
+  selectPicksForQuestions,
+  buildBankEntries,
+  mergeBank,
+  questionFingerprint,
   readQuizResult,
   detectBlocked,
 } from './lib/chaoxing.mjs';
@@ -46,7 +60,7 @@ const HELP = `超星学习通（形势与政策广场）工具（Node.js >=22.15
       --expect-user UID（可选，核对 window.userId）
 范围: --classify IDS（逗号分隔；缺省从广场页读取） --max-chapters N（run 上限）
 输出: --plan FILE（保存/读取计划） --out FILE（结果，拒绝覆盖） --journal FILE
-其他: --strategy first（默认启发式） --timeout-ms MS --help
+其他: --strategy first（默认启发式） --bank FILE --no-bank --timeout-ms MS --help
 退出码: 0 完成；1 参数/计划；2 环境/身份；3 部分完成或未满足；4 中断或结果含糊。`;
 
 const STRINGS = [
@@ -58,6 +72,7 @@ const STRINGS = [
   'target',
   'max-chapters',
   'strategy',
+  'bank',
   'confirm',
   'plan',
   'out',
@@ -68,7 +83,7 @@ const STRINGS = [
   'browser',
   'timeout-ms',
 ];
-const BOOLEANS = ['help', 'submit', 'managed', 'headless'];
+const BOOLEANS = ['help', 'submit', 'managed', 'headless', 'no-bank'];
 
 export function parseCli(argv) {
   let parsed;
@@ -129,6 +144,9 @@ export function parseCli(argv) {
   if (values.confirm && !values.submit) throw new TaskError('--confirm 只用于 --submit。', EXIT.ARGS);
   if (values.submit && !['quiz', 'run'].includes(command))
     throw new TaskError('--submit 只适用于 quiz 和 run。', EXIT.ARGS);
+  if (values.bank && values['no-bank']) throw new TaskError('--bank 与 --no-bank 不能同时使用。', EXIT.ARGS);
+  if ((values.bank || values['no-bank']) && !['quiz', 'run'].includes(command))
+    throw new TaskError('--bank 和 --no-bank 只适用于 quiz 和 run。', EXIT.ARGS);
   if (values.managed && (values.endpoint || values['user-data-dir']))
     throw new TaskError('--managed 不能与 --endpoint 或 --user-data-dir 同时使用。', EXIT.ARGS);
   if ((values['data-dir'] || values.browser || values.headless) && !values.managed)
@@ -142,6 +160,7 @@ export function parseCli(argv) {
     classId: values['class-id'] ?? null,
     expectUser: values['expect-user'] ?? null,
     classifyIds: values.classify ? values.classify.split(',') : null,
+    bankPath: values['no-bank'] ? null : (values.bank ?? join('.local', 'answer-bank.json')),
     target: values.target === undefined ? null : Number(values.target),
     maxChapters: values['max-chapters'] === undefined ? null : Number(values['max-chapters']),
   };
@@ -166,6 +185,34 @@ function openJournal(path, plan) {
     throw error;
   }
   return { append, close: () => closeSync(fd) };
+}
+
+function loadBank(path) {
+  if (!path) return null;
+  if (!existsSync(path)) return emptyBank();
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    throw new TaskError('答案库文件无法解析；请人工检查或修正后重试。', EXIT.ARGS);
+  }
+  if (!parsed || parsed.version !== 1 || !parsed.entries) {
+    throw new TaskError('答案库格式不受支持；需 version 1。', EXIT.ARGS);
+  }
+  return parsed;
+}
+
+function saveBank(path, bank) {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(bank, null, 2)}\n`);
+}
+
+function bankUsedCount(questions, bank) {
+  if (!bank) return 0;
+  return questions.filter((question) => {
+    const entry = bank.entries?.[questionFingerprint(question)];
+    return Boolean(entry && Array.isArray(entry.picks) && entry.picks.length > 0);
+  }).length;
 }
 
 async function openPlaza(client, options, signal) {
@@ -288,13 +335,31 @@ async function quiz(client, targetId, options, signal) {
     if (!prepared.quiz.hasSubmit) return { state: 'no-submit', plan };
     if (!options.submit) return { state: 'preview', plan };
     validateQuizPlan(plan, plan, options.confirm);
+    const bank = loadBank(options.bankPath);
+    const picks = selectPicksForQuestions(prepared.quiz.questions, { strategy: options.strategy, bank });
+    const used = bankUsedCount(prepared.quiz.questions, bank);
     const journalPath = options.journal ?? join('.local', 'journals', `chaoxing-${plan.digest}.jsonl`);
     const journal = openJournal(journalPath, plan);
     try {
-      journal.append({ state: 'answered', chapterId: options.chapter });
-      const answered = await answerQuiz(client, studyTarget, options.strategy, { signal });
+      journal.append({ state: 'answered', chapterId: options.chapter, used });
+      const answered = await answerQuiz(client, studyTarget, picks, { signal });
       const submitted = await submitQuiz(client, studyTarget, { signal });
       const result = await readQuizResult(client, studyTarget, { signal });
+      let bankHarvested = 0;
+      let bankConflicts = 0;
+      if (submitted.confirmed && result.score === 100 && bank) {
+        const entries = buildBankEntries(prepared.quiz.questions, picks, {
+          chapterId: options.chapter,
+          score: result.score,
+        });
+        if (entries) {
+          const merged = mergeBank(bank, entries);
+          bankHarvested = merged.added;
+          bankConflicts = merged.conflicts;
+          Object.assign(bank, merged.bank);
+          saveBank(options.bankPath, merged.bank);
+        }
+      }
       journal.append({
         state: result.blocked || !submitted.confirmed ? 'uncertain' : 'result',
         chapterId: options.chapter,
@@ -307,6 +372,7 @@ async function quiz(client, targetId, options, signal) {
         submitted,
         result,
         plan,
+        bank: { used, harvested: bankHarvested, conflicts: bankConflicts, path: options.bankPath },
         journal: journalPath,
       };
     } finally {
@@ -348,6 +414,10 @@ async function run(client, targetId, options, signal) {
   );
   const journalPath = options.journal ?? join('.local', 'journals', `chaoxing-${plan.digest}.jsonl`);
   const journal = openJournal(journalPath, plan);
+  const bank = loadBank(options.bankPath);
+  let bankUsed = 0;
+  let bankHarvested = 0;
+  let bankConflicts = 0;
   const studyTarget = await client.createTarget('about:blank', { signal });
   const outcomes = [];
   let score = before.total;
@@ -374,10 +444,23 @@ async function run(client, targetId, options, signal) {
         outcomes.push({ chapterId, state: 'no-submit' });
         continue;
       }
-      journal.append({ state: 'answered', chapterId });
-      const answered = await answerQuiz(client, studyTarget, options.strategy, { signal });
+      const picks = selectPicksForQuestions(prepared.quiz.questions, { strategy: options.strategy, bank });
+      const used = bankUsedCount(prepared.quiz.questions, bank);
+      bankUsed += used;
+      journal.append({ state: 'answered', chapterId, used });
+      const answered = await answerQuiz(client, studyTarget, picks, { signal });
       const submitted = await submitQuiz(client, studyTarget, { signal });
       const result = await readQuizResult(client, studyTarget, { signal });
+      if (submitted.confirmed && result.score === 100 && bank) {
+        const entries = buildBankEntries(prepared.quiz.questions, picks, { chapterId, score: result.score });
+        if (entries) {
+          const merged = mergeBank(bank, entries);
+          bankHarvested += merged.added;
+          bankConflicts += merged.conflicts;
+          Object.assign(bank, merged.bank);
+          saveBank(options.bankPath, merged.bank);
+        }
+      }
       const state = result.blocked ? 'blocked' : submitted.confirmed ? 'result' : 'uncertain';
       journal.append({ state, chapterId, answered, submitted, result });
       outcomes.push({ chapterId, state, answered: answered.answered, result });
@@ -404,6 +487,7 @@ async function run(client, targetId, options, signal) {
     after,
     processed,
     outcomes,
+    bank: { used: bankUsed, harvested: bankHarvested, conflicts: bankConflicts, path: options.bankPath },
     journal: journalPath,
   };
 }

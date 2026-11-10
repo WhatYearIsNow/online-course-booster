@@ -13,6 +13,11 @@ import {
   parseQuizResult,
   parseScoreDetail,
   selectOptions,
+  selectPicksForQuestions,
+  questionFingerprint,
+  emptyBank,
+  buildBankEntries,
+  mergeBank,
   validateQuizPlan,
   validateRunPlan,
 } from '../scripts/lib/chaoxing.mjs';
@@ -148,4 +153,68 @@ test('批量计划摘要绑定目标与章节列表', () => {
     /changed/,
   );
   assert.throws(() => buildRunPlan({ courseId: '100', classId: '200', target: 0, chapters: [] }), /target/);
+});
+
+// ---- Answer bank -----------------------------------------------------------
+
+const questions = [
+  { title: '题目甲', type: 'single', options: 4 },
+  { title: '题目乙', type: 'judge', options: 2 },
+  { title: '题目丙', type: 'multiple', options: 4 },
+];
+
+test('指纹对题干/题型/选项数敏感且稳定', () => {
+  const fp = questionFingerprint(questions[0]);
+  assert.equal(fp, questionFingerprint({ title: ' 题目甲 ', type: 'single', options: 4 }));
+  assert.notEqual(fp, questionFingerprint({ title: '题目甲', type: 'single', options: 3 }));
+  assert.notEqual(fp, questionFingerprint({ title: '题目乙', type: 'single', options: 4 }));
+});
+
+test('空库回落 first 启发式，命中时用记录的 picks', () => {
+  const fallback = selectPicksForQuestions(questions, { strategy: 'first', bank: emptyBank() });
+  assert.deepEqual(fallback, [[0], [0], [0, 1]]);
+  const bank = {
+    version: 1,
+    entries: {
+      [questionFingerprint(questions[0])]: { picks: [2], type: 'single', options: 4 },
+      [questionFingerprint(questions[1])]: { picks: [1], type: 'judge', options: 2 },
+    },
+  };
+  const picks = selectPicksForQuestions(questions, { strategy: 'first', bank });
+  assert.deepEqual(picks, [[2], [1], [0, 1]]);
+});
+
+test('非法库条目回落启发式', () => {
+  const bank = {
+    version: 1,
+    entries: {
+      [questionFingerprint(questions[0])]: { picks: [9], type: 'single', options: 4 },
+      [questionFingerprint(questions[1])]: { picks: [], type: 'judge', options: 2 },
+    },
+  };
+  assert.deepEqual(selectPicksForQuestions(questions, { strategy: 'first', bank })[0], [0]);
+  assert.deepEqual(selectPicksForQuestions(questions, { strategy: 'first', bank })[1], [0]);
+});
+
+test('只有整卷 100 分才沉淀', () => {
+  assert.equal(buildBankEntries(questions, [[0], [0], [0, 1]], { chapterId: '9', score: 60 }), null);
+  const entries = buildBankEntries(questions, [[0], [1], [0, 1]], { chapterId: '9', score: 100, at: 'T' });
+  assert.equal(Object.keys(entries).length, 3);
+  assert.deepEqual(entries[questionFingerprint(questions[1])].picks, [1]);
+});
+
+test('合并：新增计数、冲突保留旧值、重复确认更新章节来源', () => {
+  const entries = buildBankEntries(questions, [[3], [1], [0, 1]], { chapterId: '9', score: 100, at: 'T1' });
+  const first = mergeBank(emptyBank(), entries);
+  assert.equal(first.added, 3);
+  assert.equal(first.conflicts, 0);
+  const same = buildBankEntries(questions, [[3], [1], [0, 1]], { chapterId: '8', score: 100, at: 'T2' });
+  const second = mergeBank(first.bank, same);
+  assert.equal(second.added, 0);
+  assert.equal(second.conflicts, 0);
+  assert.ok(second.bank.entries[questionFingerprint(questions[0])].chapterIds.includes('8'));
+  const other = buildBankEntries(questions, [[1], [0], [0, 1]], { chapterId: '7', score: 100, at: 'T3' });
+  const third = mergeBank(first.bank, other);
+  assert.equal(third.conflicts, 2);
+  assert.deepEqual(third.bank.entries[questionFingerprint(questions[0])].picks, [3]);
 });

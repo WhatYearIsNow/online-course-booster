@@ -145,3 +145,17 @@ test('class-id 可选且必须是正整数', () => {
     (error) => error.code === 1,
   );
 });
+
+test('bank 参数校验与默认路径', async () => {
+  const base = ['run', '--course-id', '100', '--class-id', '200', '--target', '800'];
+  assert.ok(parseCli(base).bankPath.endsWith('answer-bank.json'));
+  assert.equal(parseCli([...base, '--no-bank']).bankPath, null);
+  assert.equal(parseCli([...base, '--bank', 'X.json']).bankPath, 'X.json');
+  assert.equal(await main([...base, '--bank', 'X.json', '--no-bank'], { errorOutput() {} }), 1);
+  assert.equal(
+    await main(['status', '--course-id', '100', '--class-id', '200', '--bank', 'X.json'], {
+      errorOutput() {},
+    }),
+    1,
+  );
+});
