@@ -110,6 +110,106 @@ export function parseQuizResult(text) {
   return { done: /已完成|已提交/.test(body), score: match ? Number(match[1]) : null };
 }
 
+/**
+ * The plaza shows a warning banner for accounts that are not part of the class.
+ * classId is account-specific, so a banner here usually means the caller passed
+ * a classId that belongs to a different account (observed 2026-11-10).
+ */
+export function enrolledFromBanner(text) {
+  return !/尚未报名/.test(String(text ?? ''));
+}
+
+/** `modify-node` echo: enrolled accounts get mode=study plus a non-empty classId. */
+export function enrolledFromNode(node) {
+  if (!node || typeof node !== 'object') return null;
+  if (node.mode !== 'study') return false;
+  return Boolean(node.classId && node.classId !== '');
+}
+
+// ---- Answer bank -----------------------------------------------------------
+// The platform only reports the whole-quiz score, so only a confirmed full-score
+// quiz proves every pick correct. Entries are keyed by a stable question
+// fingerprint (obfuscated DOM text is deterministic per question).
+
+export const BANK_VERSION = 1;
+
+export function emptyBank() {
+  return { version: BANK_VERSION, updatedAt: null, entries: {} };
+}
+
+export function questionFingerprint(question) {
+  return createHash('sha256')
+    .update(JSON.stringify({ t: String(question.title ?? '').trim(), y: question.type, o: question.options }))
+    .digest('hex');
+}
+
+function validPicks(picks, options) {
+  return (
+    Array.isArray(picks) &&
+    picks.length > 0 &&
+    picks.length < options &&
+    picks.every((index) => Number.isInteger(index) && index >= 0 && index < options)
+  );
+}
+
+/** Recorded picks win when they fit the live option count; otherwise fall back. */
+export function selectPicksForQuestions(questions, { strategy = 'first', bank = null } = {}) {
+  const entries = bank && typeof bank === 'object' ? (bank.entries ?? {}) : {};
+  const fallback = selectOptions('single', strategy);
+  return questions.map((question) => {
+    if (question.type === 'multiple') return selectOptions('multiple', strategy).slice();
+    if (question.type !== 'judge' && question.type !== 'single') return [];
+    const entry = entries[questionFingerprint(question)];
+    if (entry && validPicks(entry.picks, question.options)) return entry.picks.slice();
+    return fallback.slice();
+  });
+}
+
+export function buildBankEntries(questions, picksList, { chapterId, score, at } = {}) {
+  if (score !== 100) return null;
+  const entries = {};
+  for (let index = 0; index < questions.length; index++) {
+    const picks = picksList[index];
+    if (!Array.isArray(picks) || picks.length === 0) continue;
+    const question = questions[index];
+    if (question.type !== 'judge' && question.type !== 'single' && question.type !== 'multiple') continue;
+    entries[questionFingerprint(question)] = {
+      picks: picks.slice(),
+      type: question.type,
+      options: question.options,
+      at: at ?? new Date().toISOString(),
+      chapterIds: chapterId ? [chapterId] : [],
+    };
+  }
+  return Object.keys(entries).length ? entries : null;
+}
+
+export function mergeBank(bank, entries) {
+  const result = {
+    version: BANK_VERSION,
+    updatedAt: new Date().toISOString(),
+    entries: { ...(bank?.entries ?? {}) },
+  };
+  let added = 0;
+  let conflicts = 0;
+  for (const [fingerprint, entry] of Object.entries(entries ?? {})) {
+    const existing = result.entries[fingerprint];
+    if (!existing) {
+      result.entries[fingerprint] = entry;
+      added++;
+    } else if (JSON.stringify(existing.picks) !== JSON.stringify(entry.picks)) {
+      // Both claim full score; keep the earlier record and count the mismatch.
+      conflicts++;
+    } else {
+      existing.chapterIds = [...new Set([...(existing.chapterIds ?? []), ...(entry.chapterIds ?? [])])].slice(
+        0,
+        5,
+      );
+    }
+  }
+  return { bank: result, added, conflicts };
+}
+
 const BLOCK_RULES = [
   [/请输入验证码|拖动滑块|滑块验证|完成验证|安全验证/, 'captcha'],
   [/操作频繁|请求过于频繁|稍后再试/, 'rate-limited'],
@@ -208,6 +308,12 @@ export async function readIdentity(cdp, targetId) {
       personId: String(window.personId || ''),
     }))()`,
   );
+}
+
+/** Read-only banner probe; the plaza renders it for accounts outside the class. */
+export async function readEnrollment(cdp, targetId) {
+  const text = await cdp.evaluate(targetId, `(() => (document.body.innerText || '').slice(0, 2000))()`);
+  return enrolledFromBanner(text);
 }
 
 export async function readScore(cdp, targetId, courseId, classId) {
@@ -344,8 +450,10 @@ export async function inspectQuiz(cdp, targetId, { signal } = {}) {
         count: items.length,
         questions: items.map((item) => {
           const title = item.querySelector('.Zy_TItle_p,.fontLabel');
+          const text = title ? title.innerText : '';
           return {
-            title: title ? title.innerText : '',
+            title: text,
+            type: classifyQuestionType(text),
             options: item.querySelectorAll('li.font-cxsecret').length,
           };
         }),
@@ -360,7 +468,8 @@ export async function inspectQuiz(cdp, targetId, { signal } = {}) {
   return {
     count: raw.count,
     questions: raw.questions.map((question) => ({
-      type: classifyQuestionType(question.title),
+      title: question.title,
+      type: question.type,
       options: question.options,
     })),
     done: Boolean(raw.done),
@@ -369,24 +478,24 @@ export async function inspectQuiz(cdp, targetId, { signal } = {}) {
   };
 }
 
-export async function answerQuiz(cdp, targetId, strategy = 'first', { signal } = {}) {
+export async function answerQuiz(cdp, targetId, picksList, { signal } = {}) {
   return cdp.evaluate(
     targetId,
     `(() => {
       const q = ${QUIZ_DOC};
       if (!q) return { error: 'no-quiz-doc' };
       const log = [];
-      for (const item of q.querySelectorAll('.TiMu')) {
+      const picksList = ${JSON.stringify(picksList)};
+      const items = [...q.querySelectorAll('.TiMu')];
+      for (let index = 0; index < items.length; index++) {
+        const item = items[index];
         const title = item.querySelector('.Zy_TItle_p,.fontLabel');
         const text = title ? title.innerText : '';
         const match = text.match(/【(.*?)】/);
         const label = match ? match[1].trim() : '';
         const options = [...item.querySelectorAll('li.font-cxsecret')];
-        let picks;
-        if (label === '多选题') picks = ${JSON.stringify(selectOptions('multiple', strategy))};
-        else if (label === '判断题' || label === '单选题') picks = ${JSON.stringify(selectOptions('single', strategy))};
-        else picks = [];
-        for (const index of picks) if (options[index]) options[index].click();
+        const picks = Array.isArray(picksList[index]) ? picksList[index] : [];
+        for (const pick of picks) if (options[pick]) options[pick].click();
         log.push({ label, picks, available: options.length });
       }
       return { answered: log.length, log };

@@ -7,7 +7,16 @@
 import { parseArgs } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import { resolve, join, dirname } from 'node:path';
-import { openSync, writeSync, fsyncSync, closeSync, mkdirSync } from 'node:fs';
+import {
+  openSync,
+  writeSync,
+  fsyncSync,
+  closeSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  existsSync,
+} from 'node:fs';
 import { connect } from './cdp.mjs';
 import { ensureManagedBrowser } from './lib/launch.mjs';
 import { EXIT, TaskError, readJson, writeJsonExclusive, reserveJson } from './lib/workflow.mjs';
@@ -19,6 +28,7 @@ import {
   validateQuizPlan,
   validateRunPlan,
   readIdentity,
+  readEnrollment,
   readScore,
   readClassifyIds,
   readChapterIds,
@@ -28,23 +38,29 @@ import {
   inspectQuiz,
   answerQuiz,
   submitQuiz,
+  emptyBank,
+  selectPicksForQuestions,
+  buildBankEntries,
+  mergeBank,
+  questionFingerprint,
   readQuizResult,
   detectBlocked,
 } from './lib/chaoxing.mjs';
 
 const HELP = `超星学习通（形势与政策广场）工具（Node.js >=22.15）
-用法: node scripts/chaoxing.mjs <command> --course-id ID --class-id ID [options]
+用法: node scripts/chaoxing.mjs <command> --course-id ID [--class-id ID] [options]
 命令:
-  status                     只读：身份、总积分、达标线与分项规则
+  status                     只读：身份、总积分、达标线、分项规则与入班状态
   chapters                   只读：列出知识点（章节）ID
   quiz --chapter ID          预览单章测评；--submit --confirm DIGEST 才提交
   run --target N             预览批量冲分计划；--submit --confirm DIGEST 才执行
 连接:
   --endpoint ws://... | --user-data-dir PATH | --managed [--headless] [--data-dir DIR] [--browser PATH]
-身份: --expect-user UID（可选，核对 window.userId）
+身份: --class-id 可选；省略时自动解析当前账号的班级，解析失败或未入班即报错
+      --expect-user UID（可选，核对 window.userId）
 范围: --classify IDS（逗号分隔；缺省从广场页读取） --max-chapters N（run 上限）
 输出: --plan FILE（保存/读取计划） --out FILE（结果，拒绝覆盖） --journal FILE
-其他: --strategy first（默认启发式） --timeout-ms MS --help
+其他: --strategy first（默认启发式） --bank FILE --no-bank --timeout-ms MS --help
 退出码: 0 完成；1 参数/计划；2 环境/身份；3 部分完成或未满足；4 中断或结果含糊。`;
 
 const STRINGS = [
@@ -56,6 +72,7 @@ const STRINGS = [
   'target',
   'max-chapters',
   'strategy',
+  'bank',
   'confirm',
   'plan',
   'out',
@@ -66,7 +83,7 @@ const STRINGS = [
   'browser',
   'timeout-ms',
 ];
-const BOOLEANS = ['help', 'submit', 'managed', 'headless'];
+const BOOLEANS = ['help', 'submit', 'managed', 'headless', 'no-bank'];
 
 export function parseCli(argv) {
   let parsed;
@@ -94,8 +111,10 @@ export function parseCli(argv) {
   const command = parsed.positionals[0];
   if (parsed.positionals.length !== 1 || !['status', 'chapters', 'quiz', 'run'].includes(command))
     throw new TaskError('需要一个有效命令，使用 --help 查看用法。', EXIT.ARGS);
-  if (!/^[1-9]\d*$/.test(values['course-id'] || '') || !/^[1-9]\d*$/.test(values['class-id'] || ''))
-    throw new TaskError('需要 --course-id 和 --class-id，均为正整数 ID。', EXIT.ARGS);
+  if (!/^[1-9]\d*$/.test(values['course-id'] || ''))
+    throw new TaskError('需要 --course-id，为正整数 ID。', EXIT.ARGS);
+  if (values['class-id'] !== undefined && !/^[1-9]\d*$/.test(values['class-id']))
+    throw new TaskError('--class-id 必须是正整数 ID；省略时自动解析当前账号的班级。', EXIT.ARGS);
   if (values['expect-user'] && !/^[1-9]\d*$/.test(values['expect-user']))
     throw new TaskError('--expect-user 无效。', EXIT.ARGS);
   if (values.classify && !/^[1-9]\d*(,[1-9]\d*)*$/.test(values.classify))
@@ -125,6 +144,9 @@ export function parseCli(argv) {
   if (values.confirm && !values.submit) throw new TaskError('--confirm 只用于 --submit。', EXIT.ARGS);
   if (values.submit && !['quiz', 'run'].includes(command))
     throw new TaskError('--submit 只适用于 quiz 和 run。', EXIT.ARGS);
+  if (values.bank && values['no-bank']) throw new TaskError('--bank 与 --no-bank 不能同时使用。', EXIT.ARGS);
+  if ((values.bank || values['no-bank']) && !['quiz', 'run'].includes(command))
+    throw new TaskError('--bank 和 --no-bank 只适用于 quiz 和 run。', EXIT.ARGS);
   if (values.managed && (values.endpoint || values['user-data-dir']))
     throw new TaskError('--managed 不能与 --endpoint 或 --user-data-dir 同时使用。', EXIT.ARGS);
   if ((values['data-dir'] || values.browser || values.headless) && !values.managed)
@@ -135,9 +157,10 @@ export function parseCli(argv) {
     timeoutMs,
     strategy,
     courseId: values['course-id'],
-    classId: values['class-id'],
+    classId: values['class-id'] ?? null,
     expectUser: values['expect-user'] ?? null,
     classifyIds: values.classify ? values.classify.split(',') : null,
+    bankPath: values['no-bank'] ? null : (values.bank ?? join('.local', 'answer-bank.json')),
     target: values.target === undefined ? null : Number(values.target),
     maxChapters: values['max-chapters'] === undefined ? null : Number(values['max-chapters']),
   };
@@ -164,6 +187,34 @@ function openJournal(path, plan) {
   return { append, close: () => closeSync(fd) };
 }
 
+function loadBank(path) {
+  if (!path) return null;
+  if (!existsSync(path)) return emptyBank();
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    throw new TaskError('答案库文件无法解析；请人工检查或修正后重试。', EXIT.ARGS);
+  }
+  if (!parsed || parsed.version !== 1 || !parsed.entries) {
+    throw new TaskError('答案库格式不受支持；需 version 1。', EXIT.ARGS);
+  }
+  return parsed;
+}
+
+function saveBank(path, bank) {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(bank, null, 2)}\n`);
+}
+
+function bankUsedCount(questions, bank) {
+  if (!bank) return 0;
+  return questions.filter((question) => {
+    const entry = bank.entries?.[questionFingerprint(question)];
+    return Boolean(entry && Array.isArray(entry.picks) && entry.picks.length > 0);
+  }).length;
+}
+
 async function openPlaza(client, options, signal) {
   const url = buildPlazaUrl(options.courseId, options.classId);
   const pages = await client.targets();
@@ -185,11 +236,30 @@ async function openPlaza(client, options, signal) {
   const identity = await readIdentity(client, page.targetId);
   if (!identity.userId) throw new TaskError('未登录或登录已过期；请先在浏览器中完成登录。');
   if (identity.courseId !== options.courseId) throw new TaskError('广场页课程 ID 与 --course-id 不一致。');
-  if (identity.classId && identity.classId !== options.classId)
+  let classId = options.classId;
+  if (!classId) {
+    // The plaza resolves the caller's own class when opened without classId.
+    classId = identity.classId || '';
+    if (!/^[1-9]\d*$/.test(classId))
+      throw new TaskError(
+        '未能自动解析当前账号的班级：广场页未返回 classId。该账号可能未加入任何班级；' +
+          '请从课程链接（tsjy.chaoxing.com/plaza/?courseId=...&classId=...）取 classId 后用 --class-id 显式指定。',
+        EXIT.ENV,
+      );
+  } else if (identity.classId && identity.classId !== options.classId) {
     throw new TaskError('广场页班级 ID 与 --class-id 不一致。');
+  }
   if (options.expectUser && identity.userId !== options.expectUser)
     throw new TaskError('广场页用户 ID 与 --expect-user 不一致。');
-  return { targetId: page.targetId, identity };
+  const enrolled = await readEnrollment(client, page.targetId);
+  if (!enrolled && ['run', 'quiz'].includes(options.command))
+    throw new TaskError(
+      '当前账号在该课程下未入班（页面提示「您尚未报名」）。classId 是账号相关的，不能复用其他账号的值。' +
+        '请省略 --class-id 让工具自动解析；若仍失败，请从课程链接取当前账号的 classId，或让老师把账号加入班级。',
+      EXIT.ENV,
+    );
+  options.classId = classId;
+  return { targetId: page.targetId, identity: { ...identity, classId }, enrolled };
 }
 
 async function resolveClassify(client, targetId, options, identity) {
@@ -206,7 +276,7 @@ async function resolveClassify(client, targetId, options, identity) {
 async function status(client, targetId, options) {
   const score = await readScore(client, targetId, options.courseId, options.classId);
   if (!score) throw new TaskError('积分接口未返回有效数据。');
-  return { state: 'ok', score };
+  return { state: 'ok', score, classId: options.classId };
 }
 
 async function chapters(client, targetId, options, identity) {
@@ -265,13 +335,31 @@ async function quiz(client, targetId, options, signal) {
     if (!prepared.quiz.hasSubmit) return { state: 'no-submit', plan };
     if (!options.submit) return { state: 'preview', plan };
     validateQuizPlan(plan, plan, options.confirm);
+    const bank = loadBank(options.bankPath);
+    const picks = selectPicksForQuestions(prepared.quiz.questions, { strategy: options.strategy, bank });
+    const used = bankUsedCount(prepared.quiz.questions, bank);
     const journalPath = options.journal ?? join('.local', 'journals', `chaoxing-${plan.digest}.jsonl`);
     const journal = openJournal(journalPath, plan);
     try {
-      journal.append({ state: 'answered', chapterId: options.chapter });
-      const answered = await answerQuiz(client, studyTarget, options.strategy, { signal });
+      journal.append({ state: 'answered', chapterId: options.chapter, used });
+      const answered = await answerQuiz(client, studyTarget, picks, { signal });
       const submitted = await submitQuiz(client, studyTarget, { signal });
       const result = await readQuizResult(client, studyTarget, { signal });
+      let bankHarvested = 0;
+      let bankConflicts = 0;
+      if (submitted.confirmed && result.score === 100 && bank) {
+        const entries = buildBankEntries(prepared.quiz.questions, picks, {
+          chapterId: options.chapter,
+          score: result.score,
+        });
+        if (entries) {
+          const merged = mergeBank(bank, entries);
+          bankHarvested = merged.added;
+          bankConflicts = merged.conflicts;
+          Object.assign(bank, merged.bank);
+          saveBank(options.bankPath, merged.bank);
+        }
+      }
       journal.append({
         state: result.blocked || !submitted.confirmed ? 'uncertain' : 'result',
         chapterId: options.chapter,
@@ -284,6 +372,7 @@ async function quiz(client, targetId, options, signal) {
         submitted,
         result,
         plan,
+        bank: { used, harvested: bankHarvested, conflicts: bankConflicts, path: options.bankPath },
         journal: journalPath,
       };
     } finally {
@@ -325,6 +414,10 @@ async function run(client, targetId, options, signal) {
   );
   const journalPath = options.journal ?? join('.local', 'journals', `chaoxing-${plan.digest}.jsonl`);
   const journal = openJournal(journalPath, plan);
+  const bank = loadBank(options.bankPath);
+  let bankUsed = 0;
+  let bankHarvested = 0;
+  let bankConflicts = 0;
   const studyTarget = await client.createTarget('about:blank', { signal });
   const outcomes = [];
   let score = before.total;
@@ -351,10 +444,23 @@ async function run(client, targetId, options, signal) {
         outcomes.push({ chapterId, state: 'no-submit' });
         continue;
       }
-      journal.append({ state: 'answered', chapterId });
-      const answered = await answerQuiz(client, studyTarget, options.strategy, { signal });
+      const picks = selectPicksForQuestions(prepared.quiz.questions, { strategy: options.strategy, bank });
+      const used = bankUsedCount(prepared.quiz.questions, bank);
+      bankUsed += used;
+      journal.append({ state: 'answered', chapterId, used });
+      const answered = await answerQuiz(client, studyTarget, picks, { signal });
       const submitted = await submitQuiz(client, studyTarget, { signal });
       const result = await readQuizResult(client, studyTarget, { signal });
+      if (submitted.confirmed && result.score === 100 && bank) {
+        const entries = buildBankEntries(prepared.quiz.questions, picks, { chapterId, score: result.score });
+        if (entries) {
+          const merged = mergeBank(bank, entries);
+          bankHarvested += merged.added;
+          bankConflicts += merged.conflicts;
+          Object.assign(bank, merged.bank);
+          saveBank(options.bankPath, merged.bank);
+        }
+      }
       const state = result.blocked ? 'blocked' : submitted.confirmed ? 'result' : 'uncertain';
       journal.append({ state, chapterId, answered, submitted, result });
       outcomes.push({ chapterId, state, answered: answered.answered, result });
@@ -381,6 +487,7 @@ async function run(client, targetId, options, signal) {
     after,
     processed,
     outcomes,
+    bank: { used: bankUsed, harvested: bankHarvested, conflicts: bankConflicts, path: options.bankPath },
     journal: journalPath,
   };
 }
@@ -425,9 +532,16 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
     const plaza = await openPlaza(client, options, controller.signal);
     let result;
     if (options.command === 'status')
-      result = { ...(await status(client, plaza.targetId, options)), identity: plaza.identity };
+      result = {
+        ...(await status(client, plaza.targetId, options)),
+        identity: plaza.identity,
+        enrolled: plaza.enrolled,
+      };
     else if (options.command === 'chapters')
-      result = await chapters(client, plaza.targetId, options, plaza.identity);
+      result = {
+        ...(await chapters(client, plaza.targetId, options, plaza.identity)),
+        enrolled: plaza.enrolled,
+      };
     else if (options.command === 'quiz')
       result = await quiz(client, plaza.targetId, options, controller.signal);
     else result = await run(client, plaza.targetId, options, controller.signal);

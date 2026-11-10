@@ -159,6 +159,7 @@ export function checkRelease(root) {
       report(entry.name, 'symbolic links are not release source');
       continue;
     }
+    if (entry.name === '.git') continue; // main repo git dir or worktree gitfile
     if (entry.isDirectory() && EXCLUDED_DIRS.has(entry.name)) continue;
     if (entry.isDirectory() && SOURCE_DIRS.has(entry.name)) visit(absolute);
     else if (entry.isFile() && ROOT_FILES.has(entry.name))
