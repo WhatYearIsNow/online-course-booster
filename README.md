@@ -212,6 +212,7 @@ node scripts/chaoxing.mjs run --course-id 123456 --class-id 654321 --target 800 
 - 本地答案库：整卷 100 分的提交会沉淀到 `.local/answer-bank.json`（`--bank FILE` 改路径，`--no-bank` 关闭）；再次作答命中同指纹题时优先复用，冲突保留旧值并计数。平台只返回整卷分，无法逐题判对错，因此只有 100 分的作答是可信来源。
 - 摘要绑定课程、班级、章节与题目结构；页面变化会拒绝提交。提交不自动重试，风控或结果含糊时写 `uncertain` 并停止。
 - 日志默认 `.local/journals/chaoxing-<digest>.jsonl`，已存在时拒绝重跑；平台已完成的测评会显示「已完成」并跳过。继续上次未完成的批量任务时，用新的 `--journal` 路径。
+- `login` 命令用账号密码在（受管）浏览器登录：`--cred FILE`（`{"phone","password"}`）或 `--phone/--password`；触发验证码或登录失败即停止交人工。
 - 只实现测评作答；视频、阅读、笔记、讨论等计分项未实现。
 
 ## 项目结构

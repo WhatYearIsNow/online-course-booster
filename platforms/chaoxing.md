@@ -5,6 +5,7 @@
 ## 命令
 
 ```sh
+node scripts/chaoxing.mjs login    --managed --headless --cred CRED.json
 node scripts/chaoxing.mjs status   --course-id ID --class-id ID --managed --headless
 node scripts/chaoxing.mjs chapters --course-id ID --class-id ID --managed --headless
 node scripts/chaoxing.mjs quiz     --course-id ID --class-id ID --chapter ID --managed --headless
@@ -13,6 +14,7 @@ node scripts/chaoxing.mjs run      --course-id ID --class-id ID --target 800 --m
 
 | 命令       | 性质            | 说明                                                         |
 | ---------- | --------------- | ------------------------------------------------------------ |
+| `login`    | 登录            | 账号密码登录受管实例；验证码或失败即停，成功输出落点 URL     |
 | `status`   | 只读            | 读取 `window.userId` / `courseId` / `classId` 与积分接口     |
 | `chapters` | 只读            | 从分类接口/广场页取分类，再分页读取知识点 ID                 |
 | `quiz`     | 预览 → 提交     | 默认只预览题目结构与摘要；`--submit --confirm DIGEST` 才作答 |
