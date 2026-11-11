@@ -17,7 +17,7 @@ import {
   writeFileSync,
   existsSync,
 } from 'node:fs';
-import { connect } from './cdp.mjs';
+import { connect, sleep } from './cdp.mjs';
 import { ensureManagedBrowser } from './lib/launch.mjs';
 import { EXIT, TaskError, readJson, writeJsonExclusive, reserveJson } from './lib/workflow.mjs';
 import {
@@ -50,6 +50,7 @@ import {
 const HELP = `超星学习通（形势与政策广场）工具（Node.js >=22.15）
 用法: node scripts/chaoxing.mjs <command> --course-id ID [--class-id ID] [options]
 命令:
+  login                      账号密码登录（--cred FILE 或 --phone/--password）；触发验证码时停止交人工
   status                     只读：身份、总积分、达标线、分项规则与入班状态
   chapters                   只读：列出知识点（章节）ID
   quiz --chapter ID          预览单章测评；--submit --confirm DIGEST 才提交
@@ -73,6 +74,9 @@ const STRINGS = [
   'max-chapters',
   'strategy',
   'bank',
+  'cred',
+  'phone',
+  'password',
   'confirm',
   'plan',
   'out',
@@ -109,9 +113,11 @@ export function parseCli(argv) {
   const values = parsed.values;
   if (values.help) return { help: true };
   const command = parsed.positionals[0];
-  if (parsed.positionals.length !== 1 || !['status', 'chapters', 'quiz', 'run'].includes(command))
+  if (parsed.positionals.length !== 1 || !['status', 'chapters', 'quiz', 'run', 'login'].includes(command))
     throw new TaskError('需要一个有效命令，使用 --help 查看用法。', EXIT.ARGS);
-  if (!/^[1-9]\d*$/.test(values['course-id'] || ''))
+  if (command === 'login' && (values['course-id'] || values['class-id']))
+    throw new TaskError('login 不需要 --course-id/--class-id。', EXIT.ARGS);
+  if (command !== 'login' && !/^[1-9]\d*$/.test(values['course-id'] || ''))
     throw new TaskError('需要 --course-id，为正整数 ID。', EXIT.ARGS);
   if (values['class-id'] !== undefined && !/^[1-9]\d*$/.test(values['class-id']))
     throw new TaskError('--class-id 必须是正整数 ID；省略时自动解析当前账号的班级。', EXIT.ARGS);
@@ -144,6 +150,12 @@ export function parseCli(argv) {
   if (values.confirm && !values.submit) throw new TaskError('--confirm 只用于 --submit。', EXIT.ARGS);
   if (values.submit && !['quiz', 'run'].includes(command))
     throw new TaskError('--submit 只适用于 quiz 和 run。', EXIT.ARGS);
+  if (values.cred && (values.phone || values.password))
+    throw new TaskError('--cred 与 --phone/--password 二选一。', EXIT.ARGS);
+  if (command === 'login' && !values.cred && !(values.phone && values.password))
+    throw new TaskError('login 需要 --cred FILE，或 --phone 与 --password。', EXIT.ARGS);
+  if (command !== 'login' && (values.cred || values.phone || values.password))
+    throw new TaskError('--cred/--phone/--password 只适用于 login。', EXIT.ARGS);
   if (values.bank && values['no-bank']) throw new TaskError('--bank 与 --no-bank 不能同时使用。', EXIT.ARGS);
   if ((values.bank || values['no-bank']) && !['quiz', 'run'].includes(command))
     throw new TaskError('--bank 和 --no-bank 只适用于 quiz 和 run。', EXIT.ARGS);
@@ -185,6 +197,89 @@ function openJournal(path, plan) {
     throw error;
   }
   return { append, close: () => closeSync(fd) };
+}
+
+function readCred(path) {
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    throw new TaskError('凭据文件无法解析；需要 phone 与 password 字段的 JSON。', EXIT.ARGS);
+  }
+  const phone = String(parsed?.phone ?? '');
+  const password = String(parsed?.password ?? '');
+  if (!phone || !password) throw new TaskError('凭据文件需要 phone 与 password 字段。', EXIT.ARGS);
+  return { phone, password };
+}
+
+function inputFillScript(id, value) {
+  return `(() => {
+    const el = document.getElementById('${id}');
+    const v = ${JSON.stringify(value)};
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    setter.call(el, v);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    return el.value.length;
+  })()`;
+}
+
+async function login(client, options, signal) {
+  const cred = options.cred ? readCred(options.cred) : { phone: options.phone, password: options.password };
+  const loginUrl =
+    'https://passport2.chaoxing.com/login?fid=&refer=' + encodeURIComponent('http://i.chaoxing.com');
+  const pages = await client.targets();
+  const existing = pages.find((candidate) => candidate.url.includes('passport2.chaoxing.com'));
+  let targetId;
+  if (existing) {
+    targetId = existing.targetId;
+  } else {
+    targetId = await client.createTarget('about:blank', { signal });
+    await client.navigate(targetId, loginUrl, { signal });
+  }
+  const ready = await client.waitFor(
+    targetId,
+    `!!document.getElementById('phone') && !!document.getElementById('pwd')`,
+    { timeoutMs: 30000, intervalMs: 400, signal },
+  );
+  if (!ready) throw new TaskError('登录页未就绪；请核对网络与页面结构。', EXIT.ENV);
+  const phoneLen = await client.evaluate(targetId, inputFillScript('phone', cred.phone), { signal });
+  const pwdLen = await client.evaluate(targetId, inputFillScript('pwd', cred.password), { signal });
+  if (!phoneLen || !pwdLen) throw new TaskError('登录表单元素缺失；页面结构可能变化。', EXIT.ENV);
+  await client.evaluate(
+    targetId,
+    `(() => {
+      const remember = document.querySelector('.auto-lg-next');
+      if (remember && !remember.querySelector('.check-input.checked')) remember.click();
+      const button = document.getElementById('loginBtn');
+      if (button) button.click();
+      return true;
+    })()`,
+    { signal },
+  );
+  for (let round = 0; round < 60; round++) {
+    await sleep(500, { signal });
+    const current = (await client.targets()).find((candidate) => candidate.targetId === targetId);
+    if (!current || !current.url.includes('passport2.chaoxing.com'))
+      return { state: 'ok', url: current?.url ?? null };
+    const state = await client.evaluate(
+      targetId,
+      `(() => {
+        const tip = document.getElementById('loginTip');
+        const vcode = document.getElementById('needVcode');
+        const visible = tip ? getComputedStyle(tip).display !== 'none' : false;
+        return {
+          tipText: visible ? (tip.textContent || '').trim().slice(0, 200) : '',
+          needVcode: vcode ? String(vcode.value ?? '') : '',
+        };
+      })()`,
+      { signal },
+    );
+    if (state.needVcode === '1')
+      throw new TaskError('登录触发验证码；请在浏览器人工完成登录后重跑其余命令。', EXIT.ENV);
+    if (state.tipText) throw new TaskError(`登录失败：${state.tipText}`, EXIT.ENV);
+  }
+  throw new TaskError('登录超时：未观察到跳转、提示或验证码。', EXIT.ENV);
 }
 
 function loadBank(path) {
@@ -529,9 +624,10 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
         signal: controller.signal,
       });
     }
-    const plaza = await openPlaza(client, options, controller.signal);
+    const plaza = options.command === 'login' ? null : await openPlaza(client, options, controller.signal);
     let result;
-    if (options.command === 'status')
+    if (options.command === 'login') result = await login(client, options, controller.signal);
+    else if (options.command === 'status')
       result = {
         ...(await status(client, plaza.targetId, options)),
         identity: plaza.identity,

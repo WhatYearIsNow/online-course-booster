@@ -159,3 +159,81 @@ test('bank 参数校验与默认路径', async () => {
     1,
   );
 });
+
+function fakeLoginClient({ vcode = '', tip = '' } = {}) {
+  let created = false;
+  let logged = false;
+  return {
+    async targets() {
+      if (!created) return [];
+      if (!logged) return [{ targetId: 'L1', url: 'https://passport2.chaoxing.com/login?fid=' }];
+      return [{ targetId: 'L1', url: 'https://i.chaoxing.com/base?t=1' }];
+    },
+    async createTarget() {
+      created = true;
+      return 'L1';
+    },
+    async navigate() {},
+    async waitFor() {
+      return true;
+    },
+    async evaluate(targetId, expression) {
+      if (expression.includes("getElementById('phone')")) return 11;
+      if (expression.includes("getElementById('pwd')")) return 13;
+      if (expression.includes('.auto-lg-next')) return true;
+      if (expression.includes('loginTip')) {
+        logged = vcode === '' && tip === '';
+        return { tipText: tip, needVcode: vcode };
+      }
+      return null;
+    },
+  };
+}
+
+test('login 参数校验', async () => {
+  assert.equal(await main(['login'], { errorOutput() {} }), 1);
+  assert.equal(await main(['login', '--phone', '15700000000'], { errorOutput() {} }), 1);
+  assert.equal(
+    await main(['login', '--phone', '15700000000', '--password', 'x', '--course-id', '1'], {
+      errorOutput() {},
+    }),
+    1,
+  );
+  assert.equal(
+    await main(['login', '--cred', 'a.json', '--phone', '15700000000', '--password', 'x'], {
+      errorOutput() {},
+    }),
+    1,
+  );
+});
+
+test('login 成功路径输出落点 URL', async () => {
+  let output;
+  const code = await main(['login', '--phone', '15700000000', '--password', 'x'], {
+    connect: async () => fakeLoginClient(),
+    output: (value) => (output = value),
+  });
+  assert.equal(code, 0);
+  assert.equal(output.state, 'ok');
+  assert.ok(String(output.url).includes('i.chaoxing.com'));
+});
+
+test('login 验证码即停', async () => {
+  assert.equal(
+    await main(['login', '--phone', '15700000000', '--password', 'x'], {
+      connect: async () => fakeLoginClient({ vcode: '1' }),
+      errorOutput() {},
+    }),
+    2,
+  );
+});
+
+test('login 登录失败提示即停', async () => {
+  assert.equal(
+    await main(['login', '--phone', '15700000000', '--password', 'x'], {
+      connect: async () => fakeLoginClient({ tip: '用户名或密码错误' }),
+      errorOutput() {},
+    }),
+    2,
+  );
+});
